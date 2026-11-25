@@ -13,8 +13,10 @@ void GrammarImage::open(const ImageGrammarDesc& g) {
   plain = g.plain;
   caseInsensitive = g.caseInsensitive;
   if (g.indentOpen != nullptr) indentOpen = node(*g.indentOpen, caseInsensitive);
+  if (g.indentBlock != nullptr) indentBlock = node(*g.indentBlock, caseInsensitive);
   if (g.indentClose != nullptr) indentClose = node(*g.indentClose, caseInsensitive);
   if (g.indentNewline != nullptr) indentNewline = rule(*g.indentNewline);
+  if (g.indentNewlineIn != nullptr) indentNewlineIn = node(*g.indentNewlineIn, caseInsensitive);
 }
 
 ImageId GrammarImage::node(const ImageDesc& d, bool folded) {

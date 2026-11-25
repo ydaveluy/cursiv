@@ -1,7 +1,6 @@
 #include "cursiv/services/DefaultServiceRegistry.hpp"
 
 #include <algorithm>
-#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -26,8 +25,8 @@ void DefaultServiceRegistry::registerServices(
   // included.
   if (const std::string_view missing = shared.firstMissingService();
       !missing.empty())
-    throw ServiceRegistrationError(
-        std::format("cursiv: the shared services are missing '{}'", missing));
+    throw ServiceRegistrationError("cursiv: the shared services are missing '" +
+                                   std::string(missing) + "'");
 
   const LanguageMetaData& meta = services->languageMetaData;
   if (meta.languageId.empty())
@@ -35,15 +34,14 @@ void DefaultServiceRegistry::registerServices(
         "cursiv: a language is registered by its id, which is empty");
   if (const std::string_view missing = services->firstMissingService();
       !missing.empty())
-    throw ServiceRegistrationError(
-        std::format("cursiv: language '{}' is missing service '{}'",
-                    meta.languageId, missing));
+    throw ServiceRegistrationError("cursiv: language '" + meta.languageId +
+                                   "' is missing service '" +
+                                   std::string(missing) + "'");
   // Its services were built over another workspace, and would index and
   // resolve there.
   if (&services->shared() != &shared)
-    throw ServiceRegistrationError(
-        std::format("cursiv: language '{}' was built for another workspace",
-                    meta.languageId));
+    throw ServiceRegistrationError("cursiv: language '" + meta.languageId +
+                                   "' was built for another workspace");
 
   const CoreServices* const language = services.get();
   const CoreServices* const old = lookup(_byLanguageId, meta.languageId);
@@ -63,8 +61,8 @@ void DefaultServiceRegistry::registerServices(
     if (row.second && row.second != old)
       collisions.push_back({.severity = ObservationSeverity::Warning,
                             .code = ObservationCode::LanguageMappingCollision,
-                            .message = std::format(
-                                "two languages claim {} '{}'", kind, row.first),
+                            .message = std::string("two languages claim ") +
+                                       kind + " '" + row.first + "'",
                             .uri = {},
                             .languageId = meta.languageId});
     row.second = language;
@@ -126,8 +124,8 @@ const CoreServices& DefaultServiceRegistry::getServices(
         "registered");
   if (const CoreServices* const services = findServices(uri, languageId))
     return *services;
-  throw ServiceRegistryError(
-      std::format("cursiv: no language claims '{}'", uri));
+  throw ServiceRegistryError("cursiv: no language claims '" + std::string(uri) +
+                             "'");
 }
 
 }  // namespace cursiv

@@ -165,12 +165,4 @@ struct visible_rules<TypeList<Rs...>>
 template <class S>
 using reached_t = typename visible_rules<reached_all_t<S>>::type;
 
-// The same rules, named by `S` alone. A stage takes its rules through this
-// name, so the list is spelled neither in the stage's name nor in the name of
-// anything keyed on the stage: every row, check and rule it reads.
-template <class S>
-struct reached_of {
-  using type = reached_t<S>;
-};
-
 }  // namespace cursiv::engine

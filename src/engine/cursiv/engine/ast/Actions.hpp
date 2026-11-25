@@ -359,7 +359,7 @@ struct RowWrite<Row<K, T, detail::field_tag<P>, N, Src>> {
   }
 };
 
-// What a node of the class action `C` of the rows builds or adopts takes of
+// What a node of the class that action `C` of the rows builds or adopts takes of
 // the values from `first` up: the writes `Ws`, those of its members and its
 // bases', each applied in place; any other value goes through the write of
 // its own action, which says whether the node can take it.

@@ -143,6 +143,22 @@ struct Production {
   // Per symbol, the entry its one record takes over, none where the record
   // keeps its own: empty where no symbol's does.
   std::vector<std::uint32_t> takes;
+  // The infix node it copies under a test of the gap turned the other way,
+  // reduced where a tighter level read past that test; none for an
+  // alternative of its nonterminal.
+  std::uint32_t copyOf = kNone;
+  // Its symbols from `at` on, `count` of them, gone with their scopes and
+  // the entries their records take.
+  void erase(std::size_t at, std::size_t count) {
+    const auto cut = [&](auto& per) {
+      if (per.empty()) return;
+      const auto from = per.begin() + static_cast<std::ptrdiff_t>(at);
+      per.erase(from, from + static_cast<std::ptrdiff_t>(count));
+    };
+    cut(rhs);
+    cut(scopes);
+    cut(takes);
+  }
 };
 
 // A trivia scope: the terminals dropped between the tokens read in it, and
@@ -164,8 +180,9 @@ inline constexpr std::uint32_t kEntryLimit = 1u << 24;
 // More symbols than a production written by hand holds: repetitions with a
 // count, written out one inside the other, stop here.
 inline constexpr std::size_t kProductionLimit = std::size_t{1} << 12;
-// An action's number is 16 bits.
-inline constexpr std::size_t kActionLimit = std::size_t{1} << 16;
+// The most actions a grammar publishes: a completion word holds an action's
+// number in 14 bits.
+inline constexpr std::size_t kActionLimit = std::size_t{1} << 14;
 
 // The levels of an infix rule. An operand that is whole when an operator
 // comes is the left one of that operator or the right one of the operator
@@ -177,9 +194,26 @@ struct Infix {
     // of the level's operators.
     std::uint32_t node = 0;
     std::uint32_t operators = 0;
+    // Per token that operators of tighter levels read past a test of the
+    // gap, a copy of the node reduced on it where that test fails; ascending.
+    std::vector<std::pair<std::uint16_t, std::uint32_t>> past;
   };
   // The tightest first.
   std::vector<Level> levels;
+  // A node of level `l` against the binary or postfix operators of levels
+  // `met` that one token begins: whether it is reduced before one, and
+  // whether one may come. A postfix node ends with its operator, so no
+  // operator takes its operand: both stand.
+  [[nodiscard]] std::pair<bool, bool> order(std::uint32_t l, const auto& met) const {
+    const Association group = levels[l].group;
+    if (group == Association::Postfix) return {true, true};
+    bool before = false, coming = false;
+    for (const std::uint32_t m : met) {
+      before = before || l < m || (l == m && group == Association::Left);
+      coming = coming || m < l || (l == m && group == Association::Right);
+    }
+    return {before, coming};
+  }
 };
 
 struct Cfg {
@@ -198,16 +232,47 @@ struct Cfg {
   // The trivia scopes; scope 0 is the grammar's own.
   std::vector<Region> regions;
   // The terminals indentation makes, 0 where the grammar reads none; the
-  // brackets between which it says nothing, and the terminal that ends a
-  // line, trivia between them.
+  // brackets that open with line ends muted, those that open a block where
+  // they count, those that close; the terminal that ends a line, and the
+  // trivia whose line ends end one too.
   std::uint16_t indent = 0;
   std::uint16_t dedent = 0;
-  std::vector<std::uint16_t> opens, closes;
+  std::vector<std::uint16_t> opens, blocks, closes;
   std::uint16_t newline = 0;
+  std::vector<std::uint16_t> newlineIn;
+  // The nonterminals that may read nothing: no terminal, every symbol one
+  // that may.
+  [[nodiscard]] std::vector<bool> nullable() const {
+    std::vector<bool> blank(nonterminals, false);
+    std::vector<std::uint32_t> waits(productions.size(), kNone), work;
+    std::vector<std::vector<std::uint32_t>> within(nonterminals);
+    for (std::uint32_t p = 0; p < productions.size(); ++p) {
+      const Production& q = productions[p];
+      if (std::ranges::any_of(q.rhs, [](Symbol s) { return is_terminal(s); })) continue;
+      waits[p] = static_cast<std::uint32_t>(q.rhs.size());
+      for (const Symbol s : q.rhs) within[index_of(s)].push_back(p);
+      if (q.rhs.empty() && !blank[q.lhs]) {
+        blank[q.lhs] = true;
+        work.push_back(q.lhs);
+      }
+    }
+    while (!work.empty()) {
+      const std::uint32_t nt = work.back();
+      work.pop_back();
+      for (const std::uint32_t p : within[nt]) {
+        const std::uint32_t lhs = productions[p].lhs;
+        if (--waits[p] != 0 || blank[lhs]) continue;
+        blank[lhs] = true;
+        work.push_back(lhs);
+      }
+    }
+    return blank;
+  }
   Nesting nesting(std::uint16_t terminal) const {
     if (terminal == indent && terminal != 0) return Nesting::indent;
     if (terminal == dedent && terminal != 0) return Nesting::dedent;
     if (std::ranges::binary_search(opens, terminal)) return Nesting::open;
+    if (std::ranges::binary_search(blocks, terminal)) return Nesting::block;
     if (std::ranges::binary_search(closes, terminal)) return Nesting::close;
     return Nesting::none;
   }

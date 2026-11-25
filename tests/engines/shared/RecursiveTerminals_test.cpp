@@ -142,6 +142,15 @@ void exercise(const cursiv::Parser& parser) {
     }
   }
 
+  // A nested comment the text ends inside is read as one up to the end.
+  {
+    const std::string_view text = "comment:/* /* x */ y";
+    const auto r = parser.parse(text);
+    const auto* read = r.valueAs<trecursive::Node>();
+    CHECK(r.accepted && read != nullptr && read->text == text.substr(text.find("/*")));
+    CHECK(!r.diagnostics.empty() && r.diagnostics[0].begin == text.find("/*"));
+  }
+
   std::string deep = "comment:";
   for (unsigned i = 0; i < 100000; ++i) deep += "/*";
   for (unsigned i = 0; i < 100000; ++i) deep += "*/";
@@ -264,6 +273,9 @@ void exercise(const cursiv::Parser& parser) {
     check(parser, "unicode:", unicode);
   }
   check(parser, "bigcount:", std::string(100000, 'z'));
+  check(parser, "ping:", "i");
+  check(parser, "ping:", "o");
+  check(parser, "ping:", "io", false);
   for (auto text : {"a", "ab", "aab", "aba", "abab", "abaab"})
     check(parser, "ambiguous:", text);
   for (auto text : {"ab!", "abb!", "aabb!", "abab!"})

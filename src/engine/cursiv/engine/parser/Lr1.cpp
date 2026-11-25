@@ -33,7 +33,7 @@ struct Items {
     // What each nonterminal may begin with, whether it may read nothing, and
     // whether it then lets any token follow: a production that reads nothing
     // and holds only before tokens it names begins with them instead.
-    nullable.assign(nnts, false);
+    nullable = cfg.nullable();
     open.assign(nnts, false);
     first.assign(nnts, Bits(nterms));
     // A production is read again only when a nonterminal it may begin with
@@ -51,7 +51,7 @@ struct Items {
       queued[at] = false;
       const Production& p = cfg.productions[at];
       bool grew = false;
-      bool allNullable = true, allOpen = true;
+      bool allOpen = true;
       const auto begins = [&](std::uint16_t t) {
         if (first[p.lhs].test(t)) return;
         first[p.lhs].set(t);
@@ -60,20 +60,16 @@ struct Items {
       for (const Symbol s : p.rhs) {
         if (is_terminal(s)) {
           if (allOpen) begins(static_cast<std::uint16_t>(s));
-          allNullable = allOpen = false;
+          allOpen = false;
           break;
         }
         if (allOpen && index_of(s) != p.lhs && first[p.lhs].merge(first[index_of(s)]))
           grew = true;
         allOpen = allOpen && open[index_of(s)];
         if (!nullable[index_of(s)]) {
-          allNullable = allOpen = false;
+          allOpen = false;
           break;
         }
-      }
-      if (allNullable && !nullable[p.lhs]) {
-        nullable[p.lhs] = true;
-        grew = true;
       }
       const bool names = !p.tests.empty() && std::ranges::all_of(p.tests, [](const Test& test) {
         return !test.unless && !test.ahead.empty();
@@ -485,8 +481,8 @@ std::vector<Core> cores_of(const Items& it, const std::vector<Start>& starts,
     const auto [at, fresh] = ids.try_emplace(std::move(key), static_cast<std::uint32_t>(cores.size()));
     if (fresh) {
       if (maxStates && cores.size() == maxStates)
-        throw Refused("the grammar needs at least " + std::to_string(cores.size() + 1) +
-                      " LR states, more than LR_MAX_STATES allows (" + std::to_string(maxStates) + ")");
+        throw Refused("the grammar has more LR states than LR_MAX_STATES allows (" +
+                      std::to_string(maxStates) + ")");
       cores.emplace_back().kernel = std::move(items);
     }
     return at->second;
@@ -843,46 +839,85 @@ LrState facts(const Items& it, Closure& closure, std::span<const Position> kerne
 }
 
 // Settles which operator an operand belongs to. Where a node of level `l`
-// is whole and an operator of level `m` comes, the tighter level takes the
-// operand between them; at one level its grouping tells, or forbids both.
+// is whole and a binary or postfix operator of level `m` comes, the tighter
+// level takes the operand between them; at one level its grouping tells, or
+// forbids both: the state then reads the token to refuse it.
 void settle_infix(const Items& it, std::vector<LrState>& states) {
   const Cfg& cfg = it.cfg;
   if (cfg.infixes.empty()) return;
   // Per production that builds a node: its table and its level.
   std::vector<std::pair<std::uint32_t, std::uint32_t>> node(cfg.productions.size(), {kNone, kNone});
-  // Per table, the terminals that begin operators, each with the level of
-  // those operators; ascending.
+  // Per table, the terminals that begin binary or postfix operators, each
+  // with the level of those operators; ascending.
   std::vector<std::vector<std::pair<std::uint16_t, std::uint32_t>>> opens(cfg.infixes.size());
   for (std::uint32_t x = 0; x < cfg.infixes.size(); ++x) {
     const Infix& table = cfg.infixes[x];
     for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
       node[table.levels[l].node] = {x, l};
+      if (table.levels[l].group == Association::Prefix) continue;
       it.first[table.levels[l].operators].each(
           [&](std::size_t t) { opens[x].emplace_back(static_cast<std::uint16_t>(t), l); });
     }
     std::ranges::sort(opens[x]);
   }
+  // The terminals on which a state does not begin the operator that comes;
+  // the copies of nodes it reduces where the operator's gap test fails.
+  Bits unread(it.nterms);
+  std::vector<std::tuple<std::uint32_t, std::uint16_t, std::uint32_t>> past;
   for (LrState& state : states) {
+    bool emptied = false;
+    past.clear();
     for (auto& [prod, on] : state.reduces) {
       const auto [x, l] = node[prod];
       if (x == kNone) continue;
-      const Association group = cfg.infixes[x].levels[l].group;
+      const Infix::Level& level = cfg.infixes[x].levels[l];
+      unread.clear();
       // Where the token begins operators of several levels, a reading
       // stays where one of them lets it.
-      std::erase_if(state.shifts, [&](const auto& shift) {
-        const std::uint16_t t = shift.first;
-        const auto [from, to] =
-            std::ranges::equal_range(opens[x], t, {}, [](const auto& o) { return o.first; });
-        if (from == to || !on.test(t)) return false;
-        bool before = false, coming = false;
-        for (auto o = from; o != to; ++o) {
-          const std::uint32_t m = o->second;
-          before = before || l < m || (l == m && group == Association::Left);
-          coming = coming || m < l || (l == m && group == Association::Right);
+      on.each([&](std::size_t t) {
+        const auto [from, to] = std::ranges::equal_range(
+            opens[x], static_cast<std::uint16_t>(t), {}, [](const auto& o) { return o.first; });
+        if (from == to) return;
+        const auto [before, coming] =
+            cfg.infixes[x].order(l, std::ranges::subrange(from, to) | std::views::values);
+        if (!before) {
+          on.reset(t);
+          const auto copy = std::ranges::lower_bound(level.past, static_cast<std::uint16_t>(t), {},
+                                                     [](const auto& c) { return c.first; });
+          if (copy != level.past.end() && copy->first == t)
+            past.emplace_back(copy->second, static_cast<std::uint16_t>(t), prod);
         }
-        if (!before) on.reset(t);
-        return !coming;
+        if (!coming) unread.set(t);
+        if (!before && !coming) {
+          state.barred = true;
+          state.follow.push_back(static_cast<std::uint16_t>(t));
+        }
       });
+      if (!unread.any()) continue;
+      // An operator begins with a token the state shifts, or with a symbol
+      // that reads nothing, which it reduces.
+      std::erase_if(state.shifts, [&](const auto& shift) { return unread.test(shift.first); });
+      for (auto& [begun, with] : state.reduces)
+        if (cfg.productions[begun].rhs.empty() && with.intersects(unread)) {
+          with.remove(unread);
+          emptied = emptied || !with.any();
+        }
+    }
+    if (emptied)
+      std::erase_if(state.reduces, [](const auto& reduce) { return !reduce.second.any(); });
+    // A copy is reduced where its node is, under the node's scopes.
+    for (const auto& [copy, t, original] : past) {
+      auto at = std::ranges::lower_bound(state.reduces, copy, {}, [](const auto& r) { return r.first; });
+      if (at == state.reduces.end() || at->first != copy) {
+        at = state.reduces.emplace(at, copy, Bits(it.nterms));
+        const auto first = [](const auto& b) { return b.first; };
+        const auto from = std::ranges::lower_bound(state.behind, original, {}, first);
+        if (from != state.behind.end() && from->first == original) {
+          const std::uint64_t scopes = from->second;
+          state.behind.insert(std::ranges::lower_bound(state.behind, copy, {}, first), {copy, scopes});
+        }
+      }
+      at->second.set(t);
     }
   }
 }
@@ -1082,9 +1117,10 @@ void split_leads(Cfg& cfg) {
       if (blank) finish(skipped, copy(rhs[i], false));
     }
   };
+  // The symbols folded into the pair go; the rest keep their scopes and takes.
   const auto replace = [](Production& p, std::vector<Symbol> rhs, std::size_t folded) {
+    p.erase(1, folded);
     p.rhs = std::move(rhs);
-    if (!p.scopes.empty() && folded) p.scopes.erase(p.scopes.begin() + 1, p.scopes.begin() + 1 + folded);
   };
   // A production that tests its scope's end reads that end after its symbols.
   for (std::uint32_t q = 0; q < original.size(); ++q) {
@@ -1125,7 +1161,7 @@ void split_leads(Cfg& cfg) {
   }
   cfg.productionsOf.assign(cfg.nonterminals, {});
   for (std::uint32_t q = 0; q < cfg.productions.size(); ++q)
-    cfg.productionsOf[cfg.productions[q].lhs].push_back(q);
+    if (cfg.productions[q].copyOf == kNone) cfg.productionsOf[cfg.productions[q].lhs].push_back(q);
 }
 
 void shadow_tests(Cfg& cfg, const std::vector<RivalRow>& reads) {
@@ -1264,8 +1300,7 @@ static void guard_turns(Cfg& cfg) {
         const Mark mark{guard[index_of(q.rhs[i])], q.scope_at(i)};
         opening.emplace_back(index_of(answers.at(mark).first), tests.at(mark));
       }
-      q.rhs.erase(q.rhs.begin(), q.rhs.begin() + at);
-      if (!q.scopes.empty()) q.scopes.erase(q.scopes.begin(), q.scopes.begin() + at);
+      q.erase(0, at);
     }
     for (std::size_t i = turn[p] ? 1 : 0; i < q.rhs.size(); ++i) {
       auto& symbol = q.rhs[i];
@@ -1317,32 +1352,26 @@ void bar_tests(Cfg& cfg) {
   }
   if (std::ranges::none_of(refuses, [](const Test* test) { return test != nullptr; })) return;
   const Items it(cfg);
-  std::vector<Symbol> rhs;
-  std::vector<std::uint16_t> scopes;
+  std::vector<std::size_t> barred;
   for (std::uint32_t p = 0; p < original; ++p) {
     Production& q = cfg.productions[p];
-    rhs.clear();
-    scopes.clear();
+    barred.clear();
     for (std::size_t at = 0; at < q.rhs.size(); ++at) {
       const Symbol s = q.rhs[at];
       const Test* test = is_terminal(s) ? nullptr : refuses[index_of(s)];
       // The symbols after it may begin with none of what it refuses.
-      if (test != nullptr && std::ranges::none_of(test->ahead, [&](std::uint16_t t) {
+      if (test == nullptr || std::ranges::any_of(test->ahead, [&](std::uint16_t t) {
             return it.after[it.base[p] + at].test(t);
-          })) {
-        const auto place = static_cast<std::uint32_t>(rhs.size());
-        if (q.bars.empty() || q.bars.back().first != place)
-          q.bars.emplace_back(place, std::vector<std::uint16_t>{});
-        q.bars.back().second.insert(q.bars.back().second.end(), test->ahead.begin(),
-                                    test->ahead.end());
+          }))
         continue;
-      }
-      rhs.push_back(s);
-      if (!q.scopes.empty()) scopes.push_back(q.scopes[at]);
+      const auto place = static_cast<std::uint32_t>(at - barred.size());
+      if (q.bars.empty() || q.bars.back().first != place)
+        q.bars.emplace_back(place, std::vector<std::uint16_t>{});
+      q.bars.back().second.insert(q.bars.back().second.end(), test->ahead.begin(),
+                                  test->ahead.end());
+      barred.push_back(at);
     }
-    if (rhs.size() == q.rhs.size()) continue;
-    q.rhs = rhs;
-    if (!q.scopes.empty()) q.scopes = scopes;
+    for (const std::size_t at : std::views::reverse(barred)) q.erase(at, 1);
   }
 }
 

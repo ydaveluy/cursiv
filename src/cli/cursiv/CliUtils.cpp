@@ -4,11 +4,9 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <format>
 #include <functional>
 #include <ios>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -257,8 +255,15 @@ void printDiagnostics(const Document& document, std::string_view displayPath,
     }
     const std::size_t column = offset - lineStart + 1;
     row.clear();
-    std::format_to(std::back_inserter(row), "{}:{}:{}: {}: {}", displayPath,
-                   line, column, severity_name(d->severity), d->message);
+    row += displayPath;
+    row += ':';
+    row += std::to_string(line);
+    row += ':';
+    row += std::to_string(column);
+    row += ": ";
+    row += severity_name(d->severity);
+    row += ": ";
+    row += d->message;
     if (!d->source.empty() || d->code) {
       row += " [";
       row += d->source;
@@ -267,7 +272,7 @@ void printDiagnostics(const Document& document, std::string_view displayPath,
         if (d->code->isString())
           row += d->code->string();
         else
-          std::format_to(std::back_inserter(row), "{}", d->code->integer());
+          row += std::to_string(d->code->integer());
       }
       row += ']';
     }

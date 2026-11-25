@@ -67,10 +67,13 @@ ParseResult AstBuilder::build(const AstTables& tables, Cst&& tree,
     AstBuilder self(tables, result, cancelToken);
     const Cst& cst = self.cst;
     if (!cst.hasEntry()) {
-      ParseDiagnostic nothing;
-      nothing.kind = DiagnosticKind::ConversionError;
-      nothing.message = "the entry rule matched nothing to build from";
-      self.out.report(std::move(nothing));
+      // A parse that reported its own faults has said why no tree stands.
+      if (cst.diagnostics().empty()) {
+        ParseDiagnostic nothing;
+        nothing.kind = DiagnosticKind::ConversionError;
+        nothing.message = "the entry rule matched nothing to build from";
+        self.out.report(std::move(nothing));
+      }
       self.out.finish(nullptr, AstBuildError::NoEntry);
       return result;
     }

@@ -1740,14 +1740,18 @@ struct GrammarSpec {
   // Whether every literal and keyword ignores letter case, as `ikw<>` does:
   // `static constexpr bool case_insensitive = true;`.
   static constexpr bool case_insensitive = false;
-  // Between an opener and its closer the indentation says nothing: a
-  // grammar with `indent`/`dedent` names its brackets here, literals or
-  // terminals -- `static constexpr auto indent_open = lit<"("> | ref<LBRACK>;`.
+  // Between an `indent_open` opener and its closer, indentation says nothing
+  // and line ends are blanks, to `indent_newline` and `gap::line` alike;
+  // inside an `indent_block` opener they count again. Literals or terminals:
+  // `static constexpr auto indent_open = lit<"("> | ref<LBRACK>;`.
   static constexpr detail::Epsilon indent_open{};
+  static constexpr detail::Epsilon indent_block{};
   static constexpr detail::Epsilon indent_close{};
-  // The terminal that ends a statement; between an opener and its closer it
-  // is trivia.
+  // The terminal that ends a statement; where an `indent_open` bracket mutes
+  // line ends, it is trivia. A line end inside an `indent_newline_in` trivia,
+  // such as `ref<ML_COMMENT>`, ends a statement too.
   using indent_newline = void;
+  static constexpr detail::Epsilon indent_newline_in{};
   // End of line, which consumes its terminator (`\r\n` before `\r`), and end
   // of input, which is zero-width: inside a terminal, `eof` tests the raw
   // buffer end; in a rule, the end after the active skipper has read trivia.

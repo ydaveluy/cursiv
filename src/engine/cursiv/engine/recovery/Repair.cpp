@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -37,6 +38,8 @@ constexpr TextOffset kReachAll = 0xFFFFFFFFu;
 constexpr std::uint32_t kEditCost = 8;
 // The bytes of a walk, or the frames of a stack, one unit of work pays for.
 constexpr std::uint64_t kWorkBytes = 32;
+// A stack no tokens complete.
+constexpr std::uint32_t kNoCompletion = ~std::uint32_t{0};
 // The work a parse may spend on its repairs: a floor and a share a byte, up
 // to what bounds its latency; and the most one search takes of it.
 constexpr std::uint64_t kWorkFloor = std::uint64_t{1} << 16;
@@ -85,9 +88,16 @@ struct Edit {
   [[nodiscard]] bool matches(const Machine& m) const {
     return m.tok.head == tok.head && m.tok.end == tok.end && m.under() == state;
   }
-  [[nodiscard]] Token replacement(const Machine& m) const {
-    // The bytes are that terminal whatever they spell: no state reads them
-    // again.
+  // The token it writes, the same for the search and for the path written. It
+  // is text of the repair's: no state gives it back to be read again. An
+  // insertion holds no bytes; bytes read as a terminal are that terminal
+  // whatever they spell.
+  [[nodiscard]] Token written(const Machine& m) const {
+    if (kind == ins) {
+      Token result = token(static_cast<TextOffset>(at - m.src), at, term);
+      result.head |= kReplaced;
+      return result;
+    }
     Token result = token(tok.begin(m), m.src + end, term);
     result.head |= kReplaced | kTold;
     if (kind == substitute && (m.t.terminalRank[term] & 1)) result.head |= kLiteralBranch;
@@ -117,7 +127,9 @@ struct Candidate : Reading {
   // Where the text was read up to at the refusal it repairs: it validates
   // on the tokens past it.
   TextOffset past = 0;
-  // The required insertions it may still make at no cost.
+  // In a run of insertions on the cheapest completion of the stack, the fewest
+  // tokens that complete the stack its last one left: the next costs nothing
+  // where it lowers that by one.
   std::uint64_t freeInserts = 0;
   // Real tokens read since its last edit, as far as a goal counts them.
   std::uint8_t shifts = 0;
@@ -186,11 +198,14 @@ struct FutureHash {
 };
 
 // Where two paths part: the link they share, and under it the link of each,
-// none for a path that ends there.
+// none for a path that ends there; and where each first edits the text past
+// it, null where it edits none.
 struct Parting {
   std::uint32_t shared = kNoLink;
   std::uint32_t a = kNoLink;
   std::uint32_t b = kNoLink;
+  const char* editA = nullptr;
+  const char* editB = nullptr;
 };
 
 // The ends an unclosed token's readings may stop at, found one at a time:
@@ -273,7 +288,7 @@ class Repair {
                                 unsigned{r.held} << 6 | static_cast<unsigned>(r.pin) << 7;
     return {std::uint64_t{r.node} << 32 | offset(r.at), r.held ? r.tok.head : 0,
             std::uint64_t{r.held ? offset(r.tok.end) : 0} << 32 | flags,
-            std::uint64_t{r.indented.level} << 32 | r.indented.depth, r.past};
+            std::uint64_t{r.indented.level} << 32 | r.indented.bracket, r.past};
   }
 
   // A word the machine read: the bytes of one token.
@@ -314,7 +329,8 @@ class Repair {
   void replacement(std::uint32_t from, std::uint32_t rank);
   bool more_ends(Ends& ends, TextOffset p, const Unclosed& reading);
   [[nodiscard]] bool cuts(TextOffset at) const;
-  const Unclosed& unclosed_at(std::uint32_t state, TextOffset at, bool fault = false);
+  Unclosed unclosed_at(std::uint32_t state, TextOffset at, bool fault = false);
+  bool walk_unclosed(const ModeLexer& mode, TextOffset at, bool fault, Unclosed& out);
   [[nodiscard]] Token mode_token(std::uint16_t mode, TextOffset at);
   // How far a walk from `at` may read on what the search's share has left.
   [[nodiscard]] std::uint64_t lex_room() const {
@@ -340,6 +356,8 @@ class Repair {
   void queue(std::uint32_t f, const Candidate& r, std::uint32_t at, Work work,
              std::uint32_t rank = 0);
   [[nodiscard]] Parting part(std::uint32_t a, std::uint32_t b) const;
+  std::uint32_t completion(std::uint32_t node, std::uint16_t symbol = KernelCost::kNone);
+  void refused_at_end(std::uint32_t at);
   [[nodiscard]] bool before(const Parting& p) const;
   void tie(std::uint32_t kept, std::uint32_t dropped, const Parting& p, bool handed);
   void own(std::uint32_t from, std::uint32_t shared, std::vector<ElementId>& out) const;
@@ -362,10 +380,11 @@ class Repair {
   // The elected path, written a step a pause.
   void plan_path(std::uint32_t reading);
   bool write(const Step& st);
+  [[nodiscard]] bool arm_here() const;
   std::uint32_t split_arm();
   Exit shift(bool settles, bool repairs);
   bool write_token(Token token, bool settles = false);
-  bool write_insert(std::uint16_t term);
+  bool write_insert(const Edit& edit);
   void skip(const Edit& edit);
   bool take(std::uint32_t elected, bool bound);
   bool apply();
@@ -411,16 +430,20 @@ class Repair {
   std::vector<std::uint64_t> _literals;
   std::map<std::pair<std::uint16_t, std::string_view>, bool> _misspelt;
 
-  // Where the end-of-text insertions were last made, how many, and how many
-  // the stack found there may need.
+  // Where the end-of-text insertions were last made, and the fewest tokens
+  // that then completed the stack.
   const char* _closedAt = nullptr;
-  std::uint64_t _closed = 0;
-  std::uint64_t _closeMost = 0;
+  std::uint32_t _closedLeast = 0;
+  // Per node, and per node with a nonterminal read on it, the fewest tokens
+  // that complete its stack; and the values a computation still waits for.
+  std::unordered_map<std::uint64_t, std::uint32_t> _completions;
+  std::vector<std::pair<std::uint32_t, std::uint16_t>> _asked;
 
   // One search: the stacks, the readings, the paths and the queue.
   Cactus _stacks;
-  // The stack and the actions a split met by a reading is decided with.
-  std::vector<Frame> _frames;
+  // The states a reading's search pushed, and the actions a split it met is
+  // decided with.
+  std::vector<std::uint32_t> _above;
   std::vector<std::uint32_t> _arms;
   // Each candidate owns the edit at the same index.
   std::vector<Candidate> _readings;
@@ -440,10 +463,22 @@ class Repair {
   // of a walk the search's share cut, which are not all of them.
   std::unordered_map<std::uint64_t, std::vector<Typo>> _typos;
   std::vector<Typo> _cutTypos;
-  // Per mode and place, the unclosed token the lexer was refused there and
-  // the ends found for it; per mode and place, the token read; per
-  // mode and place its own reads no token at, where a deletion ends.
+  // Per mode and place, the unclosed token the lexer was refused there. Per
+  // place, the walks read there, each with its mode and the lexer states it
+  // asked about: a mode that reads alike in them takes it over. Per place
+  // and end, the ends found for an unclosed token; per mode and place, the
+  // token read; per mode and place its own reads no token at, where a
+  // deletion ends.
+  struct Walk {
+    std::uint16_t mode;
+    Unclosed found;
+    std::uint32_t first;
+    std::uint32_t count;
+  };
   std::unordered_map<std::uint64_t, Unclosed> _unclosed;
+  std::unordered_map<std::uint64_t, std::vector<Walk>> _walks;
+  std::vector<std::uint16_t> _walked;
+  LexVisits _visits;
   std::unordered_map<std::uint64_t, Ends> _ends;
   std::unordered_map<std::uint64_t, Token> _modeTokens;
   std::unordered_map<std::uint64_t, TextOffset> _unread;
@@ -476,6 +511,75 @@ void Repair::queue(std::uint32_t f, const Candidate& r, std::uint32_t at, Work w
   std::ranges::push_heap(_heap, kEntryAfter);
 }
 
+// The fewest tokens that complete the stack of `node`, with nonterminal
+// `symbol` read on it unless it is `kNone`: through the item of its kernel
+// that completes cheapest, each item's own nonterminal then read on the stack
+// it began on, down to the start. Each value is read once a search.
+std::uint32_t Repair::completion(std::uint32_t node, std::uint16_t symbol) {
+  const auto key = [](std::uint32_t n, std::uint16_t s) { return std::uint64_t{n} << 16 | s; };
+  if (const auto hit = _completions.find(key(node, symbol)); hit != _completions.end())
+    return hit->second;
+  _asked.assign(1, {node, symbol});
+  while (!_asked.empty()) {
+    const auto [at, read] = _asked.back();
+    if (_completions.contains(key(at, read))) {
+      _asked.pop_back();
+      continue;
+    }
+    const std::uint32_t state = _stacks.state(at);
+    std::uint32_t least = kNoCompletion;
+    bool known = true;
+    const std::uint16_t list = t.kernelOf[state];
+    for (std::uint32_t k = t.kernelAt[list]; k != t.kernelAt[list + 1]; ++k) {
+      const KernelCost item = KernelCost::of(t.kernels[k]);
+      // The tokens the item reads before its nonterminal is whole.
+      std::uint32_t own = item.rest;
+      if (read != KernelCost::kNone) {
+        if (item.symbol == KernelCost::kNone) continue;
+        own = item.after;
+        if (read != item.symbol) {
+          const std::uint32_t* first = t.corners + t.cornerAt[item.symbol];
+          const std::uint32_t* last = t.corners + t.cornerAt[item.symbol + 1];
+          const std::uint32_t* corner = std::lower_bound(
+              first, last, read, [](std::uint32_t c, std::uint16_t s) { return (c & 0xFFFF) < s; });
+          if (corner == last || (*corner & 0xFFFF) != read) continue;
+          own += *corner >> 16;
+        }
+      }
+      if (item.rest >= KernelCost::kNever || own >= KernelCost::kNever) continue;
+      std::uint32_t below = 0;
+      if (item.lhs != KernelCost::kAccept) {
+        std::uint32_t start = at;
+        for (std::uint32_t d = 0; d != item.dot && start != kNoStack; ++d) start = _stacks.parent(start);
+        if (start == kNoStack) continue;
+        const auto hit = _completions.find(key(start, item.lhs));
+        if (hit == _completions.end()) {
+          _asked.emplace_back(start, item.lhs);
+          known = false;
+          continue;
+        }
+        below = hit->second;
+      }
+      if (below != kNoCompletion) least = std::min(least, own + below);
+    }
+    if (!known) continue;
+    _completions.emplace(key(at, read), least);
+    ++_work;
+    _asked.pop_back();
+  }
+  return _completions.at(key(node, symbol));
+}
+
+// A reading that reaches the end of the text validates only once accepted,
+// whatever it read before: where the end refuses it right past its tokens, it
+// stands there and closes what it opened, as the readings it races do.
+void Repair::refused_at_end(std::uint32_t at) {
+  Candidate ahead = _readings[at];
+  if (step(ahead) != Exit::refused || ahead.tok.terminal() != kEndOfInput) return;
+  ahead.shifts = 0;
+  _readings[at] = ahead;
+}
+
 // Where paths `a` and `b` part, read from the root down.
 Parting Repair::part(std::uint32_t a, std::uint32_t b) const {
   std::uint32_t x = a, y = b;
@@ -484,15 +588,23 @@ Parting Repair::part(std::uint32_t a, std::uint32_t b) const {
     y = y == kNoLink ? a : _links[y].parent;
   }
   Parting p{x};
-  for (; a != x; a = _links[a].parent) p.a = a;
-  for (; b != x; b = _links[b].parent) p.b = b;
+  for (; a != x; a = _links[a].parent) {
+    p.a = a;
+    if (_links[a].kind != Edit::arm) p.editA = _links[a].at;
+  }
+  for (; b != x; b = _links[b].parent) {
+    p.b = b;
+    if (_links[b].kind != Edit::arm) p.editB = _links[b].at;
+  }
   return p;
 }
 
-// Whether the first path of `p` ranks before the second: the lower choice
-// where they part, and a path that ends there first.
+// Whether the first path of `p` ranks before the second: the one that edits
+// the text later, keeping more of it as written; then the lower choice where
+// they part, and a path that ends there first.
 bool Repair::before(const Parting& p) const {
   if (p.a == kNoLink || p.b == kNoLink) return p.a == kNoLink && p.b != kNoLink;
+  if (p.editA != p.editB) return p.editA == nullptr || (p.editB != nullptr && p.editA > p.editB);
   return _links[p.a].choice != _links[p.b].choice ? _links[p.a].choice < _links[p.b].choice
                                                   : p.a < p.b;
 }
@@ -572,7 +684,7 @@ void Repair::admit(std::uint32_t at, Work work) {
 std::uint32_t Repair::invent(std::uint32_t from, std::uint16_t term, std::uint32_t choice) {
   const std::uint32_t e = child(from, {.choice = choice, .kind = Edit::ins, .term = term});
   Candidate& r = _readings[e];
-  r.tok = token(offset(r.at), r.at, term);
+  r.tok = _links[e].written(m);
   r.held = true;
   r.pin = Pin::invented;
   r.invented += 1;
@@ -614,18 +726,21 @@ Exit Repair::step(Candidate& r, Token* taken) {
   Exit exit = x.step();
   std::size_t planned = 0;
   while (exit == Exit::split) {
-    // The text ahead decides, read from a copy of the reading's stack; its
-    // plan serves the splits of the same token it met.
+    // The text ahead decides, read from the reading's stack: the states the
+    // search pushed over the machine's frames; its plan serves the splits of
+    // the same token it met.
     if (planned == _arms.size() || _arms[planned] < x.arms ||
         _arms[planned] >= x.arms + x.armCount) {
-      _frames.clear();
-      for (std::uint32_t n = x.node; n != kNoStack; n = _stacks.parent(n))
-        _frames.push_back({_stacks.state(n), 0});
-      std::ranges::reverse(_frames);
+      _above.clear();
+      std::uint32_t n = x.node;
+      for (; n != kNoStack && n >= _stacks.base(); n = _stacks.parent(n))
+        _above.push_back(_stacks.state(n));
+      std::ranges::reverse(_above);
       _arms.clear();
       planned = 0;
-      resolve(m, _frames, x.at, x.tok, x.indented, x.arms, x.armCount, x.rereads, _arms);
-      _work += _frames.size() / kWorkBytes;
+      const auto stack = _stacks.frames(n);
+      resolve(m, stack, _above, x.at, x.tok, x.indented, x.arms, x.armCount, x.rereads, _arms);
+      _work += (stack.size() + _above.size()) / kWorkBytes;
       if (_arms.empty()) break;
     }
     x.resume = _arms[planned++];
@@ -644,20 +759,19 @@ Exit Repair::step(Candidate& r, Token* taken) {
   if (exit == Exit::accepted) {
     r.done = true;
   } else if (r.pin == Pin::invented) {
-    // An invented token is no token of the author's: the fault goes on. A
-    // required insertion that goes on a run of them costs nothing; the
-    // first of a run frees as many as the stack it was made on may need.
+    // An invented token is no token of the author's: the fault goes on. It is
+    // required where it begins the cheapest completion of the stack, or of
+    // the stack the run's last insertion left; past the first of a run, such
+    // a one costs nothing.
     r.pin = Pin::none;
-    r.due = t.inSet(t.closeOf[_stacks.state(_stacks.parent(r.node))], x.taken.terminal());
+    const std::uint32_t rest = completion(r.node);
+    const std::uint64_t before = r.freeInserts != 0 ? r.freeInserts : completion(from);
+    r.due = rest != kNoCompletion && rest + 1 == before;
     r.unneeded += r.due ? 0u : 1u;
     const bool goesOn = r.due && r.freeInserts != 0;
     r.cost += goesOn ? 0 : kEditCost;
     r.edits -= goesOn ? 1u : 0u;
-    const std::uint64_t depth = _stacks.depth(from);
-    const std::uint64_t most = t.closeMost != 0 && depth > ~std::uint64_t{0} / t.closeMost
-                                   ? ~std::uint64_t{0}
-                                   : depth * t.closeMost;
-    r.freeInserts = !r.due ? 0 : goesOn ? r.freeInserts - 1 : most > 0 ? most - 1 : 0;
+    r.freeInserts = r.due ? rest : 0;
   } else {
     // The author's bytes read again are a token of theirs, but none past the
     // edit that read them; a reading validates past an edit only, on tokens
@@ -692,10 +806,13 @@ Work Repair::read(std::uint32_t at) {
     const Exit exit = step(r, &taken);
     if (exit == Exit::refused && r.pin != Pin::none) return Work::none;
     const Token tok = r.held ? r.tok : taken;
-    if (const Word word{tok.begin(m), offset(tok.end)};
-        plain && !before.held && tok.terminal() < t.terminalCount && misspelt(word)) {
-      if (_looked.size() > kBackTokens) _looked.erase(_looked.begin());
-      _looked.push_back({before, word, read});
+    // A shift reads its token and a stop holds it; an acceptance reads none.
+    if (plain && !before.held && (r.held || exit == Exit::shifted) &&
+        tok.terminal() < t.terminalCount) {
+      if (const Word word{tok.begin(m), offset(tok.end)}; misspelt(word)) {
+        if (_looked.size() > kBackTokens) _looked.erase(_looked.begin());
+        _looked.push_back({before, word, read});
+      }
     }
     if (!r.held) continue;
     if (plain) misread(at, read);
@@ -774,35 +891,61 @@ void Repair::each_insert(std::uint32_t state, Visit&& visit) const {
     }
 }
 
-// The unclosed token the mode of `state` was refused at `at`, read once a
-// search, its walk counted as work.
-const Unclosed& Repair::unclosed_at(std::uint32_t state, TextOffset at, bool fault) {
-  static constexpr Unclosed kNone{};
-  if (m.src + at >= m.end || t.lexOpeners[byte_at(m.src + at)] == 0 || spent()) return kNone;
+// The unclosed token the mode of `state` was refused at `at`, as the state
+// names it, read once a search per mode.
+Unclosed Repair::unclosed_at(std::uint32_t state, TextOffset at, bool fault) {
+  if (m.src + at >= m.end || t.lexOpeners[byte_at(m.src + at)] == 0 || spent()) return {};
   const ModeLexer mode(m, state, fault);
-  const auto key = std::uint64_t{fault ? mode.mode : state} << 33 | std::uint64_t{fault} << 32 | at;
-  if (const auto hit = _unclosed.find(key); hit != _unclosed.end()) return hit->second;
-  LexWork work{lex_room()};
-  Unclosed found = unclosed(mode, at, work);
-  charge(work);
-  if (work.cut) return kNone;
-  if (!fault && found.terminal != kNoToken && !found.closed && t.modeClose != nullptr) {
-    const auto close = t.modeClose[mode.mode];
-    for (TextOffset x = at + 1; close != kNoToken && x < found.end; ++x) {
-      if ((x - at - 1) % kWorkBytes == 0) {
-        if (++_work > _limit) return kNone;
-        if (m.src + x >= m.mark) m.watch(m.src + x);
+  const auto key = std::uint64_t{mode.mode} << 33 | std::uint64_t{fault} << 32 | at;
+  auto hit = _unclosed.find(key);
+  if (hit == _unclosed.end()) {
+    Unclosed found;
+    if (!walk_unclosed(mode, at, fault, found)) return {};
+    if (!fault && !found.closed && t.modeClose != nullptr) {
+      const auto close = t.modeClose[mode.mode];
+      for (TextOffset x = at + 1; close != kNoToken && x < found.end; ++x) {
+        if ((x - at - 1) % kWorkBytes == 0) {
+          if (++_work > _limit) return {};
+          if (m.src + x >= m.mark) m.watch(m.src + x);
+        }
+        const auto first = t.transition(1, t.byteClass[byte_at(m.src + x)]);
+        if (first == 0 || !t.inSet(t.lexStates[first].reach, close)) continue;
+        if (mode_token(mode.mode, x).terminal() == close) {
+          found.end = x;
+          break;
+        }
+        if (spent()) return {};
       }
-      const auto first = t.transition(1, t.byteClass[byte_at(m.src + x)]);
-      if (first == 0 || !t.inSet(t.lexStates[first].reach, close)) continue;
-      if (mode_token(mode.mode, x).terminal() == close) {
-        found.end = x;
-        break;
-      }
-      if (spent()) return kNone;
+    }
+    hit = _unclosed.emplace(key, found).first;
+  }
+  Unclosed found = hit->second;
+  if (found.body != 0) found.terminal = mode.leads_to(found.body);
+  return found;
+}
+
+// The walk of `mode` at `at`: one a mode that reads alike in the states it
+// asked about read, or one read now and counted as work. False where the
+// search's share ran out.
+bool Repair::walk_unclosed(const ModeLexer& mode, TextOffset at, bool fault, Unclosed& out) {
+  std::vector<Walk>& walks = _walks[std::uint64_t{fault} << 32 | at];
+  for (const Walk& w : walks) {
+    const auto states = std::span(_walked).subspan(w.first, w.count);
+    if (std::ranges::all_of(states, [&](std::uint16_t s) { return mode.alike(w.mode, s); })) {
+      out = w.found;
+      return true;
     }
   }
-  return _unclosed.emplace(key, found).first->second;
+  LexWork work{lex_room()};
+  out = unclosed(mode, at, work, _visits);
+  charge(work);
+  if (!work.cut) {
+    walks.push_back({mode.mode, out, static_cast<std::uint32_t>(_walked.size()),
+                     static_cast<std::uint32_t>(_visits.states.size())});
+    _walked.insert(_walked.end(), _visits.states.begin(), _visits.states.end());
+  }
+  _visits.clear();
+  return !work.cut;
 }
 
 // The longest token of this mode. A walk that reads past its winner pays
@@ -936,7 +1079,7 @@ bool Repair::reread(std::uint32_t from, Edit edit, std::uint32_t cost) {
     r.resume = 2 * _stacks.state(r.node);
     r.phase = Phase::discardOnly;
   } else {
-    r.tok = _links[e].replacement(m);
+    r.tok = _links[e].written(m);
     r.held = true;
     r.resume = 2 * _stacks.state(r.node) + 1;
     r.pin = Pin::reread;
@@ -1008,7 +1151,7 @@ void Repair::lexical(std::uint32_t at, std::uint32_t& choice) {
     one(reading.end);
     return;
   }
-  const std::uint64_t key = std::uint64_t{t.stateMode[state]} << 32 | p;
+  const std::uint64_t key = std::uint64_t{reading.end} << 32 | p;
   for (std::size_t k = 0; !spent(); ++k) {
     Ends& ends = _ends[key];
     if (k == ends.found.size() && !more_ends(ends, p, reading)) return;
@@ -1206,6 +1349,9 @@ bool Repair::start() {
   _seen.clear();
   _typos.clear();
   _unclosed.clear();
+  _completions.clear();
+  _walks.clear();
+  _walked.clear();
   _ends.clear();
   _goals.clear();
   _under.clear();
@@ -1269,15 +1415,14 @@ std::uint32_t Repair::run(bool& exhausted, bool& raced) {
     if (best.node != kNoStack && key_order(e.f, e, best.cost, best) > 0 &&
         cost_order(e.f, e, best.cost, best) > 0) {
       if (best.done) continue;
-      Explorer proof(m, _stacks, best);
-      const auto before = m.explored;
-      const auto exit = proof.step();
-      _work += m.explored - before;
+      // A token further on, the splits on the way decided as any step decides them.
+      Candidate ahead = best;
+      const Exit exit = step(ahead);
       if (exit == Exit::accepted) {
         best.done = true;
         continue;
       }
-      if (exit == Exit::shifted) best.reading() = proof.reading();
+      if (exit == Exit::shifted) best.reading() = ahead.reading();
       else best.node = kNoStack;
     }
     if (spent()) {
@@ -1296,6 +1441,7 @@ std::uint32_t Repair::run(bool& exhausted, bool& raced) {
       replacement(e.at, e.rank);
       continue;
     }
+    if (_readings[e.at].goal() && !_readings[e.at].done) refused_at_end(e.at);
     const Candidate& x = _readings[e.at];
     if (x.goal()) {
       if (best.node == kNoStack || (x.done != best.done ? x.done : key_order(x.cost, x, best.cost, best) < 0))
@@ -1510,25 +1656,29 @@ bool Repair::write_token(Token token, bool settles) {
   return false;
 }
 
+// Whether the path's next step is the action taken at the split the states
+// stand at.
+bool Repair::arm_here() const {
+  return !_plan.empty() && _plan.back().edit.kind == Edit::arm && _plan.back().edit.matches(m);
+}
+
 // The action a split met while a step is written goes on from: the path's,
 // where its next step is taken there; else the text read ahead's, else the
 // first.
 std::uint32_t Repair::split_arm() {
-  if (!_plan.empty()) {
+  if (arm_here()) {
     const Edit& g = _plan.back().edit;
-    if (g.kind == Edit::arm && g.matches(m)) {
-      _cost += _plan.back().cost;
-      _plan.pop_back();
-      return g.resume;
-    }
+    _cost += _plan.back().cost;
+    _plan.pop_back();
+    return g.resume;
   }
   const std::uint32_t next = arm(m);
   return next != kNoStack ? next : m.arms;
 }
 
-// `term` written before the token in hand, which the states then read
-// again.
-bool Repair::write_insert(std::uint16_t term) {
+// The token insertion `edit` writes, before the token in hand, which the
+// states then read again.
+bool Repair::write_insert(const Edit& edit) {
   // The trivia read past the point is read again with the token in hand.
   // What stands before the point is written first: text a repair skipped,
   // and before the first token the comments in front of the text.
@@ -1539,7 +1689,7 @@ bool Repair::write_insert(std::uint16_t term) {
     later.assign(from, m.pending.end());
     m.pending.erase(from, m.pending.end());
   }
-  if (!write_token(token(offset(m.at), m.at, term), !m.pending.empty())) {
+  if (!write_token(edit.written(m), !m.pending.empty())) {
     m.pending.insert(m.pending.end(), later.begin(), later.end());
     return false;
   }
@@ -1583,7 +1733,7 @@ bool Repair::write(const Step& st) {
   // The terminal the note names lists what the path's first written
   // terminal could as cheaply have been, when it is that one.
   if (st.edit.kind == Edit::ins) {
-    if (!write_insert(st.edit.term)) return false;
+    if (!write_insert(st.edit)) return false;
     if (f.first == kNoElement) {
       f.first = st.edit.term;
       if (f.read == kNoElement) f.also = std::exchange(_also, {});
@@ -1591,7 +1741,7 @@ bool Repair::write(const Step& st) {
   } else if (st.edit.kind != Edit::del) {
     const TextOffset begin = m.tok.begin(m);
     if (st.edit.kind == Edit::skip) skip(st.edit);
-    else if (!write_token(st.edit.replacement(m))) return false;
+    else if (!write_token(st.edit.written(m))) return false;
     if (st.edit.kind == Edit::skip || f.first != kNoElement || f.read != kNoElement) f.also.clear();
     else f.also = std::exchange(_also, {});
     f.read = st.edit.term;
@@ -1614,23 +1764,20 @@ bool Repair::write(const Step& st) {
 }
 
 // At the end of the text, the insertions the stack still needs, in a row:
-// each the first its state offers that its shift needs, until the text is
-// read, nothing is needed or the bound is reached. Whether it made any: its
+// each the first its state offers that begins the stack's cheapest
+// completion, until the text is read or none does. Whether it made any: its
 // path is then the plan.
 bool Repair::closers() {
   start();
   // Its own share: the parse's may be spent when it is asked for.
   _limit = _work + kWorkPerSearch;
-  // What was inserted here since the last token read counts: a stack that
-  // an insertion leaves as it was is not closed by more of them.
-  if (m.at != _closedAt) {
-    _closedAt = m.at;
-    _closed = 0;
-    _closeMost = std::min(static_cast<std::uint64_t>(m.top - m.frames) * (t.closeMost + 1),
-                          kWorkPerSearch);
-  }
+  // Each time at one place, the stack must come closer to whole.
+  const std::uint32_t whole = completion(_readings[0].node);
+  if (m.at == _closedAt && whole >= _closedLeast) return false;
+  _closedAt = m.at;
+  _closedLeast = whole;
   std::uint32_t at = 0;
-  for (; !_readings[at].done && _closed < _closeMost && !spent(); ++_closed) {
+  while (!_readings[at].done && !spent()) {
     const std::uint32_t state = _stacks.state(_readings[at].node);
     std::uint32_t took = kNoReading;
     each_insert(state, [&](std::uint16_t term, std::uint32_t) {
@@ -1776,7 +1923,10 @@ Exit Repair::onward() {
     _plan.clear();
     if (_marked != Marked::stale) m.rewind(_mark);
   }
-  return engine::run(m);
+  // The states stop at a split where the path's next step takes an action,
+  // which the next pause writes, unless they read only up to a caret.
+  const Exit exit = engine::run(m, nullptr, [&] { return m.ended == kEndOfInput && arm_here(); });
+  return exit == Exit::split ? Exit::refused : exit;
 }
 
 void Repair::finish(CstBuilder& builder) {

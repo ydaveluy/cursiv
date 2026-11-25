@@ -42,6 +42,7 @@ add_library(cursivGen STATIC EXCLUDE_FROM_ALL
     ${_engine}/generator/TextMate.cpp
     ${_engine}/grammar/GrammarImage.cpp
     ${_engine}/grammar/Lower.cpp
+    ${_engine}/grammar/Optimize.cpp
     ${_engine}/grammar/WritesOnce.cpp
     ${_engine}/lexer/CharClass.cpp
     ${_engine}/lexer/LexAutomaton.cpp
@@ -66,7 +67,7 @@ set(LSP_INSTALL OFF CACHE BOOL "")
 FetchContent_Declare(
     lsp_framework
     GIT_REPOSITORY https://github.com/ydaveluy/lsp-framework.git
-    GIT_TAG        a4314cc3fe4c1b27d70f147368ebe7db07764bdf
+    GIT_TAG        4c5ccc8e487694d6b28c28902dbaec7b8f9f9b00
     GIT_SUBMODULES ""
     EXCLUDE_FROM_ALL)
 block(PROPAGATE lsp_framework_SOURCE_DIR lsp_framework_BINARY_DIR)

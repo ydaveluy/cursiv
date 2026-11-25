@@ -22,8 +22,8 @@ class InsertOrder {
   InsertOrder(const Cfg& cfg, const LrAutomaton& automaton, const Closers& needs);
 
   // The terminals of `row` that `state` reaches, in the order it reaches
-  // them: the walk stops once it met the `want` of them there are.
-  void of(std::uint32_t state, const Bits& row, std::size_t want, std::vector<std::uint16_t>& out);
+  // them: the walk stops once it met all of those that a rule reads.
+  void of(std::uint32_t state, const Bits& row, std::vector<std::uint16_t>& out);
 
  private:
   using Item = std::pair<std::uint32_t, std::uint32_t>;
@@ -64,6 +64,8 @@ class InsertOrder {
   std::vector<std::uint32_t> _base{0};
   std::vector<std::vector<std::uint32_t>> _preds;
   std::vector<std::uint32_t> _returnsOf;
+  // The terminals some rule reads.
+  Bits _read;
   std::map<std::vector<std::uint32_t>, std::uint32_t> _listIds;
   std::deque<Listed> _lists;
   Marks _seen, _met, _walked, _placed, _under;

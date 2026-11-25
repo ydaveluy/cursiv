@@ -23,9 +23,9 @@ struct LrState {
   std::vector<std::pair<std::uint32_t, std::uint32_t>> gotos;
   // Its kernel's items: production, dot.
   std::vector<std::pair<std::uint32_t, std::uint32_t>> kernel;
-  // The terminals the tests of its productions name, and those the parse
-  // reads after a test that names tokens: its lexer reads them, whatever
-  // acts on them.
+  // The terminals the tests of its productions name, and those it reads as
+  // its own whatever acts on them: what follows a test that names tokens,
+  // and the operators it refuses.
   std::vector<std::uint16_t> named;
   std::vector<std::uint16_t> follow;
   // Whether a bar stands in it: it reads the token that comes, whatever it

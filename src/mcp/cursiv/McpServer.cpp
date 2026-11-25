@@ -7,11 +7,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
-#include <istream>
 #include <mutex>
 #include <optional>
-#include <ostream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -62,6 +61,16 @@ json::Value error_response(const json::Value* id, json::Integer code,
   error["message"] = std::move(message);
   if (!data.isNull()) error["data"] = std::move(data);
   return envelope(id, "error", std::move(error));
+}
+
+// Reads up to the next newline, which it drops; false at the end of the input.
+bool read_line(std::FILE* input, std::string& line) {
+  line.clear();
+  int c = std::getc(input);
+  if (c == EOF) return false;
+  for (; c != EOF && c != '\n'; c = std::getc(input))
+    line.push_back(static_cast<char>(c));
+  return true;
 }
 
 bool valid_id(const json::Value& id) {
@@ -327,21 +336,23 @@ std::optional<std::string> McpServer::handleText(
   return answer ? std::optional(json::stringify(*answer)) : std::nullopt;
 }
 
-bool McpServer::serveStdio(std::istream& input, std::ostream& output) const {
+bool McpServer::serveStdio(std::FILE* input, std::FILE* output) const {
   std::mutex mutex;
   std::unordered_map<RequestId, std::stop_source> pending;
   const auto write = [&](const json::Value& answer) {
-    output << json::stringify(answer) << '\n' << std::flush;
+    const std::string text = json::stringify(answer) + '\n';
+    if (std::fwrite(text.data(), 1, text.size(), output) == text.size())
+      std::fflush(output);
   };
   lsp::ThreadPool worker(0, 1);
-  for (std::string line; std::getline(input, line);) {
+  for (std::string line; read_line(input, line);) {
     if (line.empty()) continue;
     json::Value message;
     auto error = parse_message(line, message);
     const auto* id = field(&message, "id");
     const auto* method = field(&message, "method");
     const std::scoped_lock lock(mutex);
-    if (!output) break;
+    if (std::ferror(output) != 0) break;
     const auto* protocol = field(&message, "jsonrpc");
     if (!id && method && *method == json::Value("notifications/cancelled") &&
         protocol && *protocol == json::Value("2.0")) {
@@ -374,11 +385,12 @@ bool McpServer::serveStdio(std::istream& input, std::ostream& output) const {
         answer = handle(std::move(message), token);
       const std::scoped_lock finished(mutex);
       if (token.stop_possible()) pending.erase(key);
-      if (answer && !token.stop_requested() && output) write(*answer);
+      if (answer && !token.stop_requested() && std::ferror(output) == 0)
+        write(*answer);
     });
   }
   worker.waitUntilFinished();
-  return static_cast<bool>(output);
+  return std::ferror(output) == 0;
 }
 
 }  // namespace cursiv

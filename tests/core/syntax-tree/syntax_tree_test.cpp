@@ -549,6 +549,26 @@ void a_hand_built_entry_is_answered_not_trusted() {
         cursiv::engine::AstBuilder::build(tables, std::move(cst));
     CHECK(!r && r.error == cursiv::AstBuildError::NoEntry);
     CHECK(r.value == nullptr);
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::ConversionError);
+  }
+  // A tape that gave up its repair has no entry and its own diagnostics, which
+  // already say why: the builder adds none.
+  {
+    cursiv::Cst cst;
+    cst.reset("doc item a");
+    {
+      cursiv::CstBuilder b(cst);
+      b.reserveRecords(1);
+      b.stream().leaf(0, 3, 0);
+      b.noteRepair(cursiv::DiagnosticKind::Deleted, cursiv::kNoElement, 0, 3);
+      b.finish(cursiv::kNoNode, false);
+    }
+    cursiv::ParseResult r =
+        cursiv::engine::AstBuilder::build(tables, std::move(cst));
+    CHECK(!r && r.error == cursiv::AstBuildError::NoEntry);
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Deleted);
   }
   // (2) In range and unreducible. A single hidden leaf as the root: the scan
   // skips it, nothing is pushed, and the result is the empty stack -- which is

@@ -8,7 +8,6 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,6 +41,11 @@ struct CompletionQuery {
   unsigned line = 0;
   unsigned character = 0;
 };
+
+// Writes `text` whole: unlike `fputs`, it keeps a NUL byte.
+void put(std::string_view text, std::FILE* out) {
+  std::fwrite(text.data(), 1, text.size(), out);
+}
 
 std::optional<CompletionQuery> parse_complete_at(std::string_view spec) {
   const std::size_t c = spec.rfind(':');
@@ -78,14 +82,14 @@ int run_completion(const CompletionQuery& query,
   const std::string uri = pathToFileUri(file.string());
   const std::shared_ptr<Document> document = shared.documents->getDocument(uri);
   if (document == nullptr) {
-    std::cerr << "no such document in the workspace: " << uri << '\n';
+    put("no such document in the workspace: " + uri + '\n', stderr);
     return 1;
   }
   const auto* services = dynamic_cast<const LspServices*>(document->language);
   const CompletionProvider* const provider =
       services == nullptr ? nullptr : services->completionProvider.get();
   if (provider == nullptr) {
-    std::cerr << "this language installs no completion provider\n";
+    std::fputs("this language installs no completion provider\n", stderr);
     return 1;
   }
 
@@ -94,18 +98,21 @@ int run_completion(const CompletionQuery& query,
   params.position.line = query.line;
   params.position.character = query.character;
   const lsp::CompletionList list = provider->getCompletion(*document, params);
-  std::cout << file.filename().string() << ':' << query.line << ':'
-            << query.character << "  " << list.items.size() << " item(s)"
-            << (list.isIncomplete ? " (incomplete)" : "") << '\n';
+  std::string out = file.filename().string() + ':' +
+                    std::to_string(query.line) + ':' +
+                    std::to_string(query.character) + "  " +
+                    std::to_string(list.items.size()) + " item(s)" +
+                    (list.isIncomplete ? " (incomplete)" : "") + '\n';
   for (const lsp::CompletionItem& item : list.items) {
-    std::cout << "  " << item.label;
-    if (item.detail.has_value()) std::cout << "  [" << *item.detail << ']';
+    out += "  " + item.label;
+    if (item.detail.has_value()) out += "  [" + *item.detail + ']';
     if (item.documentation.has_value())
       if (const auto* markup =
               std::get_if<lsp::MarkupContent>(&*item.documentation))
-        std::cout << "  -- " << markup->value;
-    std::cout << '\n';
+        out += "  -- " + markup->value;
+    out += '\n';
   }
+  put(out, stdout);
   return 0;
 }
 
@@ -115,7 +122,7 @@ int run_completion(const CompletionQuery& query,
 int run_mcp(std::string_view folderPath, SharedLspServices& shared) {
   const McpService* const service = shared.mcpService.get();
   if (service == nullptr) {
-    std::cerr << "no MCP service is installed\n";
+    std::fputs("no MCP service is installed\n", stderr);
     return 1;
   }
   const std::filesystem::path folder =
@@ -124,14 +131,13 @@ int run_mcp(std::string_view folderPath, SharedLspServices& shared) {
       {pathToFileUri(folder.string()), {}}};
   shared.workspaceManager->initializeWorkspace(folders);
   const std::unique_ptr<const McpServer> server = service->createServer();
-  if (!server->serveStdio(std::cin, std::cout)) {
-    std::cerr << "cannot write the MCP answer\n";
+  if (!server->serveStdio(stdin, stdout)) {
+    std::fputs("cannot write the MCP answer\n", stderr);
     return 1;
   }
-  // Only the end of the input ends cleanly. `std::cin`, synced with C stdio,
-  // reads a failed read as the end: `ferror` tells them apart.
-  if (std::cin.bad() || !std::cin.eof() || std::ferror(stdin) != 0) {
-    std::cerr << "cannot read the MCP input\n";
+  // Only the end of the input ends cleanly.
+  if (std::ferror(stdin) != 0 || std::feof(stdin) == 0) {
+    std::fputs("cannot read the MCP input\n", stderr);
     return 1;
   }
   return 0;
@@ -152,7 +158,7 @@ int run_language_server_main_on(
   try {
     if (registerLanguageServices) registerLanguageServices(sharedServices);
   } catch (const std::exception& error) {
-    std::cerr << serverName << ": " << error.what() << '\n';
+    put(std::string(serverName) + ": " + error.what() + '\n', stderr);
     return 1;
   }
   if (sharedServices.mcpService == nullptr)
@@ -185,8 +191,9 @@ int run_language_server_main_on(
       continue;
     const std::optional<CompletionQuery> query = parse_complete_at(spec);
     if (!query.has_value()) {
-      std::cerr << serverName << ' ' << kFlag
-                << " FILE:LINE:CHARACTER   (line and character are 0-based)\n";
+      put(std::string(serverName) + ' ' + std::string(kFlag) +
+              " FILE:LINE:CHARACTER   (line and character are 0-based)\n",
+          stderr);
       return 2;
     }
     return run_completion(*query, folder, sharedServices);

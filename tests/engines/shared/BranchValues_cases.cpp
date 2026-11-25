@@ -220,6 +220,16 @@ void run() {
         count_of);
   built("count: c % ( abc ] ; d % [ p q ) ; e # x 1 y ; f % ( g h ) ;",
         "c=0 d=0 e=2 f=3 ", count_of);
+
+  // The record a left recursion hands over keeps its place once the test
+  // before it is gone.
+  const std::string chained = "link: do a.b !";
+  const cursiv::ParseResult r = parser().parse(chained);
+  const auto* in = r.valueAs<ast::Items>();
+  const ast::Link* link =
+      clean(r) && in != nullptr && in->items.size() == 1 ? in->items[0]->link : nullptr;
+  CHECK(link != nullptr && link->op == "." && link->left != nullptr &&
+        link->left->name == "a" && link->right != nullptr && link->right->name == "b");
 }
 
 }  // namespace branch_values_cases

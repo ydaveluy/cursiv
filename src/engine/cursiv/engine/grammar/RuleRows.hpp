@@ -66,11 +66,20 @@ template <class S, class T, class... Ops>
 struct op_rows<S, T, TypeList<Ops...>> {
   using type = TypeList<owned_row<T::op_pointer, infix_src<S, Ops, T::op_pointer>>...>;
 };
+// A prefix or postfix level builds its own node and writes its own members.
+template <class S, class T, class L, bool Unary = detail::is_unary_level<L>>
+struct level_rows : op_rows<S, T, typename detail::alts_list<typename L::op_expr>::type> {};
+template <class S, class T, class L>
+struct level_rows<S, T, L, true> {
+  using type = detail::tl_cat_t<
+      TypeList<Row<WriteKind::climb, typename L::node_type>, owned_row<L::operand_pointer>>,
+      typename op_rows<S, L, typename detail::alts_list<typename L::op_expr>::type>::type>;
+};
 template <class S, class T, class Lvls = typename T::levels>
 struct infix_level_rows;
 template <class S, class T, class... Ls>
 struct infix_level_rows<S, T, detail::Levels<Ls...>>
-    : detail::tl_cat<typename op_rows<S, T, typename detail::alts_list<typename Ls::op_expr>::type>::type...> {};
+    : detail::tl_cat<typename level_rows<S, T, Ls>::type...> {};
 
 template <class S, class R>
 struct RuleRows<S, R, true> {

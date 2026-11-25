@@ -38,7 +38,16 @@ class Lowering {
     _cfg.nonterminals = 1;
     _region = grammar_region(_image.trivia, kEndOfInput, kNone);
     brackets(_image.indentOpen, _cfg.opens);
+    brackets(_image.indentBlock, _cfg.blocks);
     brackets(_image.indentClose, _cfg.closes);
+    // A bracket opens, opens a block or closes: one of the three.
+    std::vector<std::uint16_t> named(_cfg.opens);
+    named.insert(named.end(), _cfg.blocks.begin(), _cfg.blocks.end());
+    named.insert(named.end(), _cfg.closes.begin(), _cfg.closes.end());
+    std::ranges::sort(named);
+    if (std::ranges::adjacent_find(named) != named.end())
+      throw Refused("a bracket is named by more than one of indent_open, indent_block and "
+                    "indent_close");
     if (_image.indentNewline != kNoImage) _cfg.newline = terminal_of(_image.indentNewline);
     inspect_rules(_image.rule(*_desc.entry));
     const Symbol entry = rule_symbol(_image.rule(*_desc.entry));
@@ -78,184 +87,209 @@ class Lowering {
           throw Refused("the grammar closes a `section<>` on a token that the embedded grammar "
                         "also reads, or that starts one of its tokens");
     }
-    seed_lists();
-    fold_wrappers();
     _cfg.productionsOf.resize(_cfg.nonterminals);
     for (std::uint32_t p = 0; p < _cfg.productions.size(); ++p)
       _cfg.productionsOf[_cfg.productions[p].lhs].push_back(p);
     operator_copies();
+    newline_trivia();
     return std::move(_cfg);
   }
 
  private:
-  // A nonterminal that only gives an entry to the one record of a left
-  // recursion, `W -> Y`, is read as `Y` where it is used, and the production
-  // that reads it gives the record that entry: no state reduces `W` for free.
-  void fold_wrappers() {
-    const std::size_t nnts = _cfg.nonterminals;
-    // Per nonterminal: its production where it has one; whether it calls
-    // itself first; its productions not yet known to write one record, and
-    // the nonterminals that read it alone.
-    constexpr std::uint32_t kSeveral = kNone - 1;
-    std::vector<std::uint32_t> only(nnts, kNone), waits(nnts, 0);
-    std::vector<bool> recursive(nnts, false);
-    std::vector<std::vector<std::uint32_t>> readers(nnts);
-    for (std::uint32_t p = 0; p < _cfg.productions.size(); ++p) {
-      const Production& q = _cfg.productions[p];
-      only[q.lhs] = only[q.lhs] == kNone ? p : kSeveral;
-      if (!q.rhs.empty() && q.rhs[0] == nonterminal(q.lhs)) recursive[q.lhs] = true;
-      if (q.entry != kNone || (q.rhs.size() == 1 && is_terminal(q.rhs[0]))) continue;
-      ++waits[q.lhs];
-      if (q.rhs.size() == 1) readers[index_of(q.rhs[0])].push_back(q.lhs);
-    }
-    // Whether a nonterminal always writes one record.
-    std::vector<bool> single(nnts, false);
-    std::vector<std::uint32_t> work;
-    for (std::uint32_t nt = 0; nt < nnts; ++nt)
-      if (waits[nt] == 0) work.push_back(nt);
-    while (!work.empty()) {
-      const std::uint32_t nt = work.back();
-      work.pop_back();
-      single[nt] = true;
-      for (const std::uint32_t reader : readers[nt])
-        if (--waits[reader] == 0) work.push_back(reader);
-    }
-    const auto folds = [&](std::uint32_t nt) {
-      if (only[nt] >= kSeveral) return false;
-      const Production& q = _cfg.productions[only[nt]];
-      if (q.rhs.size() != 1 || is_terminal(q.rhs[0]) || q.entry == kNone || q.tested() || q.start ||
-          q.implied || q.prefixTurn || q.rank != 0 || !q.scopes.empty() || !q.takes.empty())
-        return false;
-      const std::uint32_t read = index_of(q.rhs[0]);
-      return read != nt && recursive[read] && single[read];
-    };
-    for (Production& user : _cfg.productions) {
-      if (!user.scopes.empty()) continue;
-      std::size_t taken = 0;
-      for (std::size_t at = 0; at < user.rhs.size() && taken != kMostTakes; ++at) {
-        if (is_terminal(user.rhs[at]) || !folds(index_of(user.rhs[at]))) continue;
-        const Production& wrapper = _cfg.productions[only[index_of(user.rhs[at])]];
-        if (wrapper.region != user.region) continue;
-        user.rhs[at] = wrapper.rhs[0];
-        if (user.takes.empty()) user.takes.assign(user.rhs.size(), kNone);
-        user.takes[at] = wrapper.entry;
-        ++taken;
-      }
-    }
-  }
-
-  // A list read after its first item, `X N` with `N -> | N S X`, takes that
-  // item as its base, `N -> X | N S X`: no production of it reads nothing.
-  void seed_lists() {
-    const std::size_t nnts = _cfg.nonterminals;
-    // Per nonterminal, its productions where it has two: an empty base, then
-    // a turn.
-    std::vector<std::uint32_t> baseOf(nnts, kNone), turnOf(nnts, kNone), had(nnts, 0);
-    for (std::uint32_t p = 0; p < _cfg.productions.size(); ++p) {
-      const std::uint32_t nt = _cfg.productions[p].lhs;
-      (had[nt] == 0 ? baseOf : turnOf)[nt] = p;
-      ++had[nt];
-    }
-    const auto plain = [](const Production& q) {
-      return q.entry == kNone && !q.tested() && !q.start && !q.implied && !q.prefixTurn &&
-             q.rank == 0 && q.scopes.empty();
-    };
-    std::vector<bool> lists(nnts, false);
-    for (std::uint32_t nt = 0; nt < nnts; ++nt) {
-      if (had[nt] != 2) continue;
-      const Production& base = _cfg.productions[baseOf[nt]];
-      const Production& turn = _cfg.productions[turnOf[nt]];
-      lists[nt] = base.rhs.empty() && turn.rhs.size() >= 2 && turn.rhs[0] == nonterminal(nt) &&
-                  plain(base) && plain(turn) && base.region == turn.region &&
-                  std::ranges::count(turn.rhs, nonterminal(nt)) == 1;
-    }
-    const auto list = [&](Symbol s) { return !is_terminal(s) && lists[index_of(s)]; };
-    // Per list, the symbols every use reads before it as its turn ends, none
-    // of them a list: as many as its turn has where no use is met yet.
-    std::vector<std::size_t> count(nnts);
-    for (std::uint32_t nt = 0; nt < nnts; ++nt)
-      if (lists[nt]) count[nt] = _cfg.productions[turnOf[nt]].rhs.size();
-    for (const Production& user : _cfg.productions)
-      for (std::size_t at = 0; at < user.rhs.size(); ++at) {
-        if (!list(user.rhs[at])) continue;
-        const std::uint32_t nt = index_of(user.rhs[at]);
-        if (at == 0 && user.lhs == nt) continue;
-        const Production& turn = _cfg.productions[turnOf[nt]];
-        std::size_t same = 0;
-        if (user.region == turn.region && user.scopes.empty() && !user.prefixTurn) {
-          const std::size_t most = std::min({count[nt], turn.rhs.size() - 1, at});
-          while (same < most && user.rhs[at - 1 - same] == turn.rhs[turn.rhs.size() - 1 - same] &&
-                 !list(user.rhs[at - 1 - same]))
-            ++same;
-        }
-        count[nt] = same;
-      }
-    const auto moves = [&](Symbol s) {
-      return list(s) && count[index_of(s)] != _cfg.productions[turnOf[index_of(s)]].rhs.size()
-                 ? count[index_of(s)] : 0;
-    };
-    std::vector<Symbol> kept;
-    for (std::uint32_t p = 0; p < _cfg.productions.size(); ++p) {
-      Production& user = _cfg.productions[p];
-      if (lists[user.lhs] && p == baseOf[user.lhs]) {
-        const std::vector<Symbol>& turn = _cfg.productions[turnOf[user.lhs]].rhs;
-        user.rhs.assign(turn.end() - static_cast<std::ptrdiff_t>(moves(nonterminal(user.lhs))),
-                        turn.end());
-        continue;
-      }
-      kept.clear();
-      for (std::size_t at = 0; at < user.rhs.size(); ++at) {
-        if (at != 0 || !list(user.rhs[0]) || index_of(user.rhs[0]) != user.lhs)
-          kept.resize(kept.size() - moves(user.rhs[at]));
-        kept.push_back(user.rhs[at]);
-      }
-      user.rhs.assign(kept.begin(), kept.end());
-    }
-  }
-
-  // A token that opens operators of several levels of an infix rule is read
-  // as a copy of its own per level, spelled the same: the token after it
-  // tells which reads on. A production several levels reach keeps its token.
+  // A token that opens operators of several levels of an infix rule that
+  // stand at one place, before an operand or behind one, is read as a copy
+  // of its own per level, spelled the same: the token after it tells which
+  // reads on. A nonterminal such levels begin with is copied the same way.
+  // What levels of several places begin with keeps its tokens. A node a
+  // tighter operator takes a token from past a test of the gap keeps it
+  // where that test fails.
   void operator_copies() {
-    // Per level of every table, numbered across them: the productions that
-    // read an operator's first token, each with the one level that reaches
-    // it, `kNone` where several do; per table and such token, its levels.
-    std::map<std::uint32_t, std::uint32_t> firsts;
+    if (_cfg.infixes.empty()) return;
+    // The nonterminals that may read nothing.
+    std::vector<bool> blank = _cfg.nullable();
+    // The symbols production `p` may begin with, each with its place in it.
+    const auto leading = [&](std::uint32_t p, auto&& each) {
+      for (std::size_t i = 0; i < _cfg.productions[p].rhs.size(); ++i) {
+        const Symbol s = _cfg.productions[p].rhs[i];
+        each(i, s);
+        if (is_terminal(s) || !blank[index_of(s)]) break;
+      }
+    };
+    // Per level of every table, numbered across them: its place and the
+    // nonterminal of its operators. Per place and symbol an operator may
+    // begin with, the levels it begins; per nonterminal, the one level that
+    // reaches it, `kSeveral` where more do.
+    constexpr std::uint32_t kSeveral = kNone - 1;
     std::map<std::pair<std::uint32_t, Symbol>, std::vector<std::uint32_t>> opens;
-    std::vector<std::uint32_t> work, seen(_cfg.nonterminals, kNone), tableOf;
-    std::uint32_t level = 0;
+    std::vector<std::uint32_t> work, seen(_cfg.nonterminals, kNone), reached(_cfg.nonterminals, kNone);
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> levels;
     for (std::uint32_t x = 0; x < _cfg.infixes.size(); ++x)
       for (const Infix::Level& told : _cfg.infixes[x].levels) {
-        tableOf.push_back(x);
+        const auto level = static_cast<std::uint32_t>(levels.size());
+        const std::uint32_t place = x << 1 | (told.group == Association::Prefix ? 1u : 0u);
+        levels.emplace_back(place, told.operators);
         work.assign(1, told.operators);
         seen[told.operators] = level;
         while (!work.empty()) {
           const std::uint32_t at = work.back();
           work.pop_back();
-          for (const std::uint32_t p : _cfg.productionsOf[at]) {
-            const Production& op = _cfg.productions[p];
-            if (op.rhs.empty()) continue;
-            if (!is_terminal(op.rhs[0])) {
-              if (seen[index_of(op.rhs[0])] != level) work.push_back(index_of(op.rhs[0]));
-              seen[index_of(op.rhs[0])] = level;
-              continue;
-            }
-            const auto [first, made] = firsts.try_emplace(p, level);
-            if (!made && first->second != level) first->second = kNone;
-            std::vector<std::uint32_t>& levels = opens[{x, op.rhs[0]}];
-            if (levels.empty() || levels.back() != level) levels.push_back(level);
-          }
+          reached[at] = reached[at] == kNone ? level : kSeveral;
+          for (const std::uint32_t p : _cfg.productionsOf[at])
+            leading(p, [&](std::size_t, Symbol s) {
+              std::vector<std::uint32_t>& begun = opens[{place, s}];
+              if (begun.empty() || begun.back() != level) begun.push_back(level);
+              if (is_terminal(s) || seen[index_of(s)] == level) return;
+              seen[index_of(s)] = level;
+              work.push_back(index_of(s));
+            });
         }
-        ++level;
       }
+    // Each level rewrites what it alone reaches, and its copies, and reads on
+    // through what levels share without rewriting it. Per level and token it
+    // opens with, the gap tests read just before, as a list of `tested`;
+    // kNone for none, or where walks read different ones.
+    struct Walk {
+      std::uint32_t nt, guard;
+      bool own;
+    };
+    std::vector<std::vector<std::uint32_t>> tested;
+    std::map<std::vector<std::uint32_t>, std::uint32_t> listed;
+    const auto and_then = [&](std::uint32_t guard, std::uint32_t g) {
+      std::vector<std::uint32_t> list = guard == kNone ? std::vector<std::uint32_t>{} : tested[guard];
+      if (const auto at = std::ranges::lower_bound(list, g); at == list.end() || *at != g)
+        list.insert(at, g);
+      const auto [known, fresh] = listed.try_emplace(list, static_cast<std::uint32_t>(tested.size()));
+      if (fresh) tested.push_back(std::move(list));
+      return known->second;
+    };
+    std::vector<Walk> walk;
+    std::vector<std::uint32_t> entered(_cfg.nonterminals, kNone);
     std::map<std::pair<Symbol, std::uint32_t>, Symbol> copies;
-    for (const auto& [p, l] : firsts) {
-      Symbol& t = _cfg.productions[p].rhs[0];
-      if (l == kNone || opens[{tableOf[l], t}].size() < 2) continue;
-      const auto [copy, made] = copies.try_emplace({t, l});
-      if (made) copy->second = add_terminal(_cfg.terminals[t]);
-      t = copy->second;
+    std::map<std::pair<std::uint32_t, Symbol>, std::uint32_t> guards;
+    std::ranges::fill(seen, kNone);
+    for (std::uint32_t level = 0; level < levels.size(); ++level) {
+      const std::uint32_t place = levels[level].first;
+      walk.assign(1, {levels[level].second, kNone, true});
+      seen[levels[level].second] = level;
+      entered[levels[level].second] = kNone;
+      while (!walk.empty()) {
+        const Walk from = walk.back();
+        walk.pop_back();
+        for (std::size_t k = 0; k < _cfg.productionsOf[from.nt].size(); ++k) {
+          const std::uint32_t p = _cfg.productionsOf[from.nt][k];
+          std::uint32_t guard = from.guard;
+          leading(p, [&](std::size_t i, Symbol s) {
+            Symbol mine = s;
+            const auto begun = opens.find({place, s});
+            const bool copied =
+                from.own && begun != opens.end() && begun->second.size() > 1 &&
+                (is_terminal(s) ||
+                 std::ranges::any_of(_cfg.productionsOf[index_of(s)], [&](std::uint32_t q) {
+                   return !_cfg.productions[q].rhs.empty();
+                 }));
+            if (copied) {
+              const auto [copy, made] = copies.try_emplace({s, level});
+              if (made) {
+                copy->second = is_terminal(s) ? Symbol{add_terminal(_cfg.terminals[s])}
+                                              : nonterminal(copy_of(index_of(s)));
+                if (!is_terminal(s)) {
+                  blank.push_back(blank[index_of(s)]);
+                  seen.push_back(kNone);
+                  entered.push_back(kNone);
+                }
+              }
+              mine = copy->second;
+              _cfg.productions[p].rhs[i] = mine;
+            }
+            if (is_terminal(mine)) {
+              const auto [known, fresh] = guards.try_emplace({level, mine}, guard);
+              if (!fresh && known->second != guard) known->second = kNone;
+              return;
+            }
+            const std::uint32_t n = index_of(mine);
+            if (const std::uint32_t g = gap_test_of(n); g != kNone) {
+              guard = and_then(guard, g);
+              return;
+            }
+            const bool own = from.own && (copied || n >= reached.size() || reached[n] != kSeveral);
+            if (seen[n] != level) {
+              seen[n] = level;
+              entered[n] = guard;
+              walk.push_back({n, guard, own});
+            } else if (entered[n] != guard && entered[n] != kNone) {
+              entered[n] = kNone;
+              walk.push_back({n, kNone, own});
+            }
+            guard = kNone;
+          });
+        }
+      }
     }
+    // Per table and token behind an operand, its levels and the gap tests
+    // read before it at all of them. A node they take it from is reduced on
+    // it by a copy that holds where one of those tests fails.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> at;
+    for (std::uint32_t x = 0; x < _cfg.infixes.size(); ++x)
+      for (std::uint32_t l = 0; l < _cfg.infixes[x].levels.size(); ++l) at.emplace_back(x, l);
+    std::map<std::pair<std::uint32_t, Symbol>, std::pair<std::vector<std::uint32_t>, std::uint32_t>> read;
+    for (const auto& [opened, guard] : guards) {
+      const auto [level, t] = opened;
+      if ((levels[level].first & 1) != 0) continue;
+      const auto [entry, fresh] = read.try_emplace({at[level].first, t});
+      entry->second.first.push_back(at[level].second);
+      if (fresh) entry->second.second = guard;
+      else if (entry->second.second != guard) entry->second.second = kNone;
+    }
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> past;
+    for (const auto& [where, opening] : read) {
+      const auto& [ms, guard] = opening;
+      if (guard == kNone) continue;
+      Infix& table = _cfg.infixes[where.first];
+      for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
+        const auto [before, coming] = table.order(l, ms);
+        if (before || !coming) continue;
+        const auto [copy, made] = past.try_emplace({table.levels[l].node, guard});
+        if (made) {
+          Production node = _cfg.productions[table.levels[l].node];
+          node.tests.clear();
+          for (const std::uint32_t g : tested[guard]) {
+            Test& fails = node.tests.emplace_back(_cfg.productions[g].tests.front());
+            fails.gapUnless = !fails.gapUnless;
+          }
+          node.copyOf = table.levels[l].node;
+          copy->second = static_cast<std::uint32_t>(_cfg.productions.size());
+          _cfg.productions.push_back(std::move(node));
+        }
+        table.levels[l].past.emplace_back(static_cast<std::uint16_t>(where.second), copy->second);
+      }
+    }
+    for (Infix& table : _cfg.infixes)
+      for (Infix::Level& level : table.levels) std::ranges::sort(level.past);
+  }
+
+  // The production of `nt` that reads nothing where the gap alone passes a
+  // test, as `!gap::line` lowers; kNone for any other nonterminal.
+  std::uint32_t gap_test_of(std::uint32_t nt) const {
+    const std::vector<std::uint32_t>& of = _cfg.productionsOf[nt];
+    if (of.size() != 1) return kNone;
+    const Production& q = _cfg.productions[of.front()];
+    return q.rhs.empty() && q.tests.size() == 1 && q.tests.front().ahead.empty() &&
+                   q.tests.front().condition == 0 && q.tests.front().gap != Test::Gap::any
+               ? of.front()
+               : kNone;
+  }
+
+  // A nonterminal that reads what `nt` reads: its productions over again.
+  std::uint32_t copy_of(std::uint32_t nt) {
+    const std::uint32_t made = _cfg.nonterminals++;
+    _cfg.productionsOf.emplace_back();
+    for (std::size_t k = 0; k < _cfg.productionsOf[nt].size(); ++k) {
+      Production copy = _cfg.productions[_cfg.productionsOf[nt][k]];
+      copy.lhs = made;
+      _cfg.productionsOf[made].push_back(static_cast<std::uint32_t>(_cfg.productions.size()));
+      _cfg.productions.push_back(std::move(copy));
+    }
+    return made;
   }
 
   std::uint16_t add_terminal(Terminal terminal) {
@@ -501,6 +535,38 @@ class Lowering {
     return made;
   }
 
+  // The trivia `indent_newline_in` names, as every scope passes them: each
+  // a terminal, trivia in one scope at least.
+  void newline_trivia() {
+    if (_image.indentNewlineIn == kNoImage) return;
+    if (_cfg.newline == 0)
+      throw Refused("indent_newline_in names trivia, but indent_newline names no line terminal");
+    std::vector<std::uint16_t> named;
+    for (std::vector<ImageId> open{_image.indentNewlineIn}; !open.empty();) {
+      const ImageNode n = _image.nodes[open.back()];
+      open.pop_back();
+      if (n.kind == ImageKind::choice) {
+        for (std::uint32_t i = 0; i < n.count; ++i) open.push_back(_image.children[n.first + i]);
+        continue;
+      }
+      if (n.kind != ImageKind::ref || _image.stage(n.a).kind != ImageRuleKind::terminal)
+        throw Refused("indent_newline_in names a token that is not trivia");
+      named.push_back(terminal_of(n.a));
+    }
+    std::ranges::sort(named);
+    for (std::uint16_t t = 1; t < _cfg.terminals.size(); ++t) {
+      const Terminal& x = _cfg.terminals[t];
+      if (x.trivia != Trivia::none &&
+          (std::ranges::binary_search(named, t) || std::ranges::binary_search(named, x.twin)))
+        _cfg.newlineIn.push_back(t);
+    }
+    for (const std::uint16_t n : named)
+      if (std::ranges::none_of(_cfg.newlineIn, [&](std::uint16_t t) {
+            return t == n || _cfg.terminals[t].twin == n;
+          }))
+        throw Refused("indent_newline_in names a token that is not trivia");
+  }
+
   // The tokens `id` names as brackets: each one token.
   void brackets(ImageId id, std::vector<std::uint16_t>& out) {
     if (id == kNoImage) return;
@@ -523,19 +589,17 @@ class Lowering {
     return at->second;
   }
 
-  // An infix rule reads its primary, or two of itself around an operator of
-  // one level: the node's production gives each operand's record its entry.
-  // The states settle which operator an operand belongs to, from the table.
+  // An infix rule reads its primary, two of itself around an operator of a
+  // binary level, or itself next to an operator of a prefix or postfix level:
+  // the node's production gives each operand's record its entry. The states
+  // settle which operator an operand belongs to, from the table. A prefix
+  // operator is preferred to a primary that reads the same text.
   void infix(std::uint32_t rule, std::uint32_t nt, const ImageStageDesc& stage) {
-    produce(nt, {rule_symbol(_image.rule(*stage.primary))});
-    // A data rule only conditions read writes no record: an operand that
-    // comes down to one takes no entry.
-    std::uint32_t operand = _image.rule(*stage.primary);
-    for (std::size_t seen = 0;
-         seen < _cfg.rules.size() && _image.stage(operand).kind == ImageRuleKind::infix; ++seen)
-      operand = _image.rule(*_image.stage(operand).primary);
-    const bool written = _image.stage(operand).kind != ImageRuleKind::data ||
-                         _action.contains(_image.stage(operand).convertRow);
+    const bool prefixed =
+        std::any_of(stage.levels, stage.levels + stage.levelCount, [](const ImageStageLevelDesc& level) {
+          return level.group == Association::Prefix;
+        });
+    produce(nt, {rule_symbol(_image.rule(*stage.primary))}, kNone, prefixed ? 1 : 0);
     Infix table;
     for (std::uint32_t l = 0; l < stage.levelCount; ++l) {
       const ImageStageLevelDesc& level = stage.levels[l];
@@ -548,10 +612,20 @@ class Lowering {
         produce(told.operators, std::move(read), entry_of(level.ops[k].row));
       }
       told.node = static_cast<std::uint32_t>(_cfg.productions.size());
-      produce(nt, {nonterminal(nt), nonterminal(told.operators), nonterminal(nt)},
-              entry_of(stage.climbRow));
-      if (written)
-        _cfg.productions.back().takes = {entry_of(stage.leftRow), kNone, entry_of(stage.rightRow)};
+      const Symbol self = nonterminal(nt), ops = nonterminal(told.operators);
+      switch (level.group) {
+        case Association::Prefix:
+          produce(nt, {ops, self}, entry_of(level.climbRow));
+          _cfg.productions.back().takes = {kNone, entry_of(level.operandRow)};
+          break;
+        case Association::Postfix:
+          produce(nt, {self, ops}, entry_of(level.climbRow));
+          _cfg.productions.back().takes = {entry_of(level.operandRow), kNone};
+          break;
+        default:
+          produce(nt, {self, ops, self}, entry_of(stage.climbRow));
+          _cfg.productions.back().takes = {entry_of(stage.leftRow), kNone, entry_of(stage.rightRow)};
+      }
     }
     _cfg.infixes.push_back(std::move(table));
   }
@@ -745,10 +819,10 @@ class Lowering {
           return b == s || (x.literal() && x.text == y.text);
         };
         for (const Symbol s : read.symbols)
-          if (is_terminal(s) && (std::ranges::any_of(_cfg.opens, [&](std::uint16_t b) { return spelled(b, s); }) ||
-                                 std::ranges::any_of(_cfg.closes, [&](std::uint16_t b) { return spelled(b, s); })))
-            throw Refused("an implied token cannot be a bracket named by indent_open or "
-                          "indent_close");
+          for (const auto* named : {&_cfg.opens, &_cfg.blocks, &_cfg.closes})
+            if (is_terminal(s) && std::ranges::any_of(*named, [&](std::uint16_t b) { return spelled(b, s); }))
+              throw Refused("an implied token cannot be a bracket named by indent_open, "
+                            "indent_block or indent_close");
         produce(nt, std::move(read));
         std::vector<Test> tests = co_await asked(_image.children[n.first + 1]);
         produce(nt, {}, kNone, 1);
@@ -1089,6 +1163,10 @@ class Lowering {
           break;
         case ImageKind::eof:
           out.push_back(_cfg.regions[_region].end);
+          break;
+        case ImageKind::indent:
+        case ImageKind::dedent:
+          out.push_back(static_cast<std::uint16_t>(unread(indentation(n.kind == ImageKind::indent))));
           break;
         case ImageKind::ref: {
           const Symbol s = rule_symbol(n.a);

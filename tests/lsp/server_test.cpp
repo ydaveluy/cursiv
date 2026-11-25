@@ -10,20 +10,19 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <future>
-#include <iostream>
 #include <latch>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -103,6 +102,10 @@
 #include "support/Throws.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "workspace/generated/Workspace/Module.hpp"
+
+#ifndef __wasi__
+#include <unistd.h>
+#endif
 
 // Fails one allocation on the calling thread, after `after` others. Where the
 // global allocator is not this file's, nothing fails.
@@ -3638,6 +3641,7 @@ void register_workspace(cursiv::SharedLspServices& shared) {
   (void)support::add_workspace<cursiv::LspServices>(shared);
 }
 
+#ifndef __wasi__
 // `a.ws` declares a type; `sub/b.ws` asks for one at its caret.
 [[nodiscard]] std::filesystem::path scratch() {
   const std::filesystem::path root =
@@ -3648,24 +3652,40 @@ void register_workspace(cursiv::SharedLspServices& shared) {
   std::ofstream(root / "sub" / "b.ws") << "entity E { f : \n}\n";
   return root;
 }
+#endif
 
-// What the binary prints for one command line.
+// What the binary prints for one command line. Capturing stdout needs
+// dup/dup2, which WASI does not provide: there it comes back empty.
 [[nodiscard]] std::string ran(std::vector<std::string> args,
                             int expectedStatus = 0) {
   std::vector<char*> argv;
   argv.push_back(const_cast<char*>("srv"));
   for (std::string& arg : args) argv.push_back(arg.data());
-  std::ostringstream captured;
-  std::streambuf* const out = std::cout.rdbuf(captured.rdbuf());
+  std::fflush(stdout);
+#ifndef __wasi__
+  const int saved = dup(fileno(stdout));
+  std::FILE* const capture = std::tmpfile();
+  dup2(fileno(capture), fileno(stdout));
+#endif
   cursiv::SharedLspServices shared;
   const int status = cursiv::detail::run_language_server_main_on(
       static_cast<int>(argv.size()), argv.data(), "srv", &register_workspace,
       shared);
-  std::cout.rdbuf(out);
+  std::fflush(stdout);
+  std::string printed;
+#ifndef __wasi__
+  dup2(saved, fileno(stdout));
+  close(saved);
+  std::rewind(capture);
+  for (int c; (c = std::getc(capture)) != EOF;)
+    printed.push_back(static_cast<char>(c));
+  std::fclose(capture);
+#endif
   CHECK(status == expectedStatus);
-  return captured.str();
+  return printed;
 }
 
+#ifndef __wasi__
 void the_folder_given_is_the_workspace_scanned() {
   const std::filesystem::path root = scratch();
   const std::string caret = (root / "sub" / "b.ws").string() + ":0:15";
@@ -3679,6 +3699,7 @@ void the_folder_given_is_the_workspace_scanned() {
   CHECK(narrow.find("Alpha") == std::string::npos);
   CHECK(narrow.find("item(s)") != std::string::npos);
 }
+#endif
 
 void invalid_completion_coordinates_are_rejected() {
   for (const std::string_view suffix :
@@ -3689,7 +3710,9 @@ void invalid_completion_coordinates_are_rejected() {
 }  // namespace
 
 void run() {
+#ifndef __wasi__
   the_folder_given_is_the_workspace_scanned();
+#endif
   invalid_completion_coordinates_are_rejected();
 }
 

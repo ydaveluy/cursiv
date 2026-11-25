@@ -2,7 +2,6 @@
 // through and the actions it publishes.
 #pragma once
 
-#include "cursiv/engine/grammar/InfixLevel.hpp"
 #include "cursiv/engine/grammar/RuleRows.hpp"
 #include "cursiv/engine/grammar/reached.hpp"
 #include "cursiv/grammar/GrammarUtils.hpp"
@@ -14,10 +13,7 @@ namespace cursiv::engine {
 template <class G>
 struct Facts {
   using resolved = detail::ResolveOverride<G>;
-  using materialized = detail::MaterializeCreate<resolved>;
-  // The rules `entry`, `ignored` and `hidden` reach, named by the grammar
-  // alone.
-  using stage = InfixStage<materialized, reached_of<resolved>>;
+  using stage = detail::MaterializeCreate<resolved>;
   using rules = reached_t<stage>;
   using rows = typename AllRows<stage, rules>::type;
 };

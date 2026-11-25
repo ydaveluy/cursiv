@@ -60,10 +60,6 @@ struct Repairer {
   template <unsigned Shapes, class Fuse = std::nullptr_t>
   CURSIV_NOINLINE NodeCount close(NodeCount open, std::uint32_t entry, const char* where,
                                   Fuse fuse = nullptr) {
-    if constexpr (Shapes == kRecordEmpty) {
-      m.settle();
-      m.make_room();
-    }
     return m.template close<Shapes>(open, entry, where, fuse);
   }
   template <class Fuse>

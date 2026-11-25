@@ -98,12 +98,14 @@ struct PackedState {
   std::uint32_t reduce = kNone;
   // Ascending terminals.
   std::vector<PackedAction> actions;
-  // The terminals a repair may have to insert in it.
+  // The terminals a repair may have to insert in it, and its kernel as the
+  // fewest tokens that complete a stack read it.
   Bits close;
+  std::vector<std::uint64_t> kernel;
   // Those a repair tries first, in order, where that is not their numbers'.
   std::vector<std::uint16_t> inserts;
-  // The terminals its tests name, and those the parse reads after them: its
-  // lexer reads them too.
+  // The terminals its tests name, and those it reads as its own whatever
+  // acts on them: its lexer reads them too.
   std::vector<std::uint16_t> named;
   std::vector<std::uint16_t> follow;
   // Whether a token in hand that another state's lexer read is read again
@@ -168,13 +170,13 @@ struct Packed {
   LexPaths paths;
   // Sets of terminals, each written once, a row of a word per 64 terminals.
   // Per lexer state, the terminals that end in it or past it; per state, those
-  // it has an action for, those a repair may have to insert there, and those
-  // whose insertion there may be required.
+  // it has an action for, and those whose insertion there may be required.
   std::vector<std::uint64_t> terminalSets;
   std::vector<std::uint16_t> lexReachOf;
   std::vector<std::uint16_t> lexTieEnds;
   std::vector<std::uint16_t> followOf;
-  std::vector<std::uint16_t> closeOf;
+  // The set of the trivia whose line ends end a line.
+  std::uint16_t newlineIn = 0;
   std::vector<std::uint16_t> mayCloseOf;
   std::vector<bool> lexTrivia;  // A trivia can end at or beyond this DFA state.
   // What reads the terminals the automaton reads the first bytes of only,
@@ -218,8 +220,14 @@ struct Packed {
   // Per mode, whether it passes every terminal the grammar drops and reads
   // none of them as a token: the bytes of `skipped` are then dropped unread.
   std::vector<bool> modeSkips;
-  // The most tokens the shortest reading of a production takes.
-  std::uint64_t closeMost = 0;
+  // Per state its kernel, each written once, and per nonterminal its left
+  // corners, as the fewest tokens that complete a stack read them (see
+  // `Tables::kernels`).
+  std::vector<std::uint16_t> kernelOf;
+  std::vector<std::uint32_t> kernelAt;
+  std::vector<std::uint64_t> kernels;
+  std::vector<std::uint32_t> cornerAt;
+  std::vector<std::uint32_t> corners;
   // Per nonterminal, whether it can read nothing.
   std::vector<bool> nullable;
   // Per mode, the mode a fault of its states is read in: the terminals

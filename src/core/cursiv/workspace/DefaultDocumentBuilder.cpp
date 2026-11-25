@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <format>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -340,10 +339,9 @@ void DefaultDocumentBuilder::build(std::span<Document* const> documents,
   // The index and the requests are keyed by the store's identities.
   for (const Document* const d : documents)
     if (_shared.documents->getDocument(d->id).get() != d)
-      throw DocumentStoreError(
-          std::format("cursiv: '{}' is built once the store holds it: add it "
-                      "with Documents::addDocument",
-                      d->uri));
+      throw DocumentStoreError("cursiv: '" + d->uri +
+                               "' is built once the store holds it: add it "
+                               "with Documents::addDocument");
   runAttempt([&] {
     std::vector<std::string_view> uris;
     uris.reserve(documents.size());

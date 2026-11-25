@@ -95,13 +95,22 @@ std::size_t Machine::standing(NodeCount records) const {
 
 void Machine::checkpoint(Checkpoint& made) const {
   const std::size_t kept = std::min(standing(made.records), made.frames.size());
+  const NodeCount from = kept != made.frames.size() ? made.frames[kept].open : made.records;
+  while (!made.words.empty() && made.words.back().first >= from) made.words.pop_back();
   made.frames.resize(kept);
   made.frames.insert(made.frames.end(), frames + kept, top);
+  // A symbol has one record when the last of its records before the trivia
+  // read after it begins it.
+  for (const Frame* f = frames + kept; f != top; ++f) {
+    NodeCount id = f + 1 != top ? f[1].open : tape.records();
+    while (id != f->open && tape.at(id - 1).element() >= kSkippedElement) --id;
+    if (id != f->open && id - tape.at(id - 1).subtreeSize == f->open)
+      made.words.emplace_back(id - 1, tape.at(id - 1).engine());
+  }
   made.pending = pending;
   made.plan = plan;
   made.planned = planned;
   made.records = tape.records();
-  if (made.records != 0) made.last = tape.at(made.records - 1);
   made.at = static_cast<TextOffset>(at - src);
   made.tok = tok;
   made.resume = resume;
@@ -112,7 +121,7 @@ void Machine::rewind(const Checkpoint& to) {
   std::ranges::copy(to.frames, frames);
   top = frames + to.frames.size();
   tape.truncate(to.records);
-  if (to.records != 0) tape.at(to.records - 1) = to.last;
+  for (const auto& [id, word] : to.words) tape.at(id).setEngine(word);
   pending = to.pending;
   plan = to.plan;
   planned = to.planned;
@@ -167,12 +176,48 @@ void Machine::indent(Indented& at, Token tok, bool muted) {
   levels.opened.push_back(opening);
 }
 
+std::uint32_t Machine::Levels::opening(std::uint32_t bracket, bool mutes) {
+  const std::size_t b = bracket >> 1, n = base ? base->brackets.size() : 0;
+  if (n == 0 && brackets.empty()) brackets.emplace_back();
+  if (b < n && base->brackets[b].inner[mutes] != 0) return base->brackets[b].inner[mutes];
+  std::uint32_t& known = b < n ? innerOfBase[std::uint64_t{bracket} << 1 | mutes] : brackets[b - n].inner[mutes];
+  if (known != 0) return known;
+  const auto made = static_cast<std::uint32_t>((n + brackets.size()) << 1 | mutes);
+  known = made;
+  brackets.push_back({bracket, {}});
+  return made;
+}
+
+Token Machine::line_in_trivia(const char* p, Token tok, std::uint32_t state, Indented at) {
+  const char* const next = src + tok.begin(*this);
+  // A line end that is the token in hand is read already.
+  if (next != end && (*next == '\n' || *next == '\r')) return tok;
+  if (!line_between(p, next, at)) return tok;
+  const std::uint16_t mode = t.stateMode[state];
+  for (const char* q = p; q < next;) {
+    const Token x = walk(q, mode, 1, q);
+    if (x.end <= q) break;
+    if (t.inSet(t.newlineIn, x.terminal()) && line_between(q, x.end, at)) {
+      // The trivia's line end, moved to the gap's last byte: what the state
+      // reads there, the line terminal's own guard deciding.
+      const Token line = walk(next - 1, mode, t.transition(1, t.byteClass['\n']), next);
+      const std::uint16_t as = line.terminal();
+      return as < t.terminalCount && t.terminalTrivia[as] == Trivia::none &&
+                     t.inSet(t.followOf[state], as)
+                 ? token(tok.begin(*this), next, as)
+                 : tok;
+    }
+    q = x.end;
+  }
+  return tok;
+}
+
 Token Machine::indentation(const char* p, Indented& at) {
   if (p != blankLine) {
     const char* run = p;
     const char* q = p;
     while (q != end) {
-      const char* const edge = end - q > kWatchedBytes ? watched(q) : end;
+      const char* const edge = watched(q, end);
       while (q != edge && (*q == ' ' || *q == '\t' || *q == '\f')) {
         if (*q == '\f') run = q + 1;
         ++q;
@@ -223,7 +268,7 @@ bool Machine::gap_reads(std::uint32_t monitor, const char* from, const char* to,
   const TextMonitor& m = t.monitors[monitor];
   std::uint32_t state = 1;
   while (from != to) {
-    const char* const edge = to - from > kWatchedBytes ? watched(from) : to;
+    const char* const edge = watched(from, to);
     for (; from != edge; ++from) {
       if (!whole && (m.flags[state] & 1) != 0) return true;
       state = m.next[state * m.classes + m.byteClass[byte_at(from)]];
@@ -244,7 +289,7 @@ bool Machine::settles(std::uint32_t list, const char* p, LexWork* work) {
     passed.clear();
     const auto left = work && work->read < work->limit ? work->limit - work->read : 0;
     const char* bound = work && left < static_cast<std::uint64_t>(end - p) ? p + left : end;
-    const char* until = end - p > kWatchedBytes ? p + kWatchedBytes : end;
+    const char* until = watched(p, end);
     const char* q = p;
     for (;; ++q) {
       if (q == bound) {
@@ -255,7 +300,7 @@ bool Machine::settles(std::uint32_t list, const char* p, LexWork* work) {
         result = {(m.flags[state] & 2) != 0, true};
         break;
       }
-      if (q == until) until = watched(q);
+      if (q == until) until = watched(q, end);
       if (const auto here = static_cast<TextOffset>(q - src); here % kSettledStride == 0) {
         const MonitorPlace place{monitor, state, here};
         if (const auto known = settled.find(place); known != settled.end()) {
@@ -308,7 +353,7 @@ std::uint32_t Machine::ending(Token tok) const {
   std::uint32_t state = 1;
   const char* p = src + tok.begin(*this);
   while (p != tok.end && state != 0) {
-    const char* const edge = tok.end - p > kWatchedBytes ? watched(p) : tok.end;
+    const char* const edge = watched(p, tok.end);
     for (; p != edge && state != 0; ++p)
       state = t.transition(state, t.byteClass[byte_at(p)]);
   }
@@ -358,13 +403,9 @@ Token Machine::read_slow(Token x, unsigned mode, bool keep, Reader lex) {
 }
 
 void Machine::watch(const char* at) {
-  mark = watched(at);
-  observe_end(at == end);
-}
-
-const char* Machine::watched(const char* at) const {
   throwIfCancelled(stop);
-  return end - at > kWatchedBytes ? at + kWatchedBytes : end;
+  mark = watched(at, end);
+  observe_end(at == end);
 }
 
 const char* Machine::run_on(std::uint32_t run, const char* p) {

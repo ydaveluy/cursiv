@@ -107,7 +107,7 @@ struct Visibility : rule<as<Vis::Public>(kw<"public">)
 | `using hidden = T;` or `list<T…>` | Trivia kept in the CST, so that comments can be attached to the next node. |
 | `static constexpr auto word_boundary = c;` | The characters that continue a word; `w` by default. |
 | `static constexpr bool case_insensitive = true;` | Every literal and keyword ignores letter case, as `ikw<>` does; `false` by default. See [Case-insensitive languages](../recipes/case-insensitive.md). |
-| `indent_open`, `indent_close`, `indent_newline` | [Indentation](#indentation) settings. |
+| `indent_open`, `indent_block`, `indent_close`, `indent_newline`, `indent_newline_in` | [Indentation](#indentation) settings. |
 
 A trivia terminal must consume input, and belongs to `ignored` or `hidden`,
 never both.
@@ -214,17 +214,16 @@ token.
 
 ## Tokens
 
-The parser reads the text one token at a time. A parse is **viable** when it
-has read the text so far without error. A token's **category** is keyword,
-literal or pattern: a terminal that reads one keyword or one literal has that
-category, and any other terminal, such as `some(d)`, is a pattern.
+The parser reads the text one token at a time. A terminal that reads one fixed
+word or text is a keyword or a literal; any other, such as `some(d)`, is a
+pattern.
 
 | Rule | Example |
 |---|---|
-| Only the terminals that a viable parse can accept at this point are tried, plus trivia and what the [conditions](#conditions) there name. | Where only `ID` is expected, `if` reads as an `ID`, even if the grammar uses `kw<"if">` elsewhere. |
-| The longest match wins. At equal length, other tokens beat trivia, and keywords and literals beat patterns. An expected keyword also beats trivia that starts with the same word, when its word boundary holds. | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
-| Other ties keep every match: each parse continues with the token it can accept. | With `LOW : terminal<some(cr<"a-z">)>` and `NAME : terminal<some(cr<"a-zA-Z">)>`, `(ref<LOW> + lit<";">) | (ref<NAME> + lit<":">)` accepts `abc:`. |
-| Once read, a token is never split again, even if the parse then fails. | `(lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">)` rejects `ab`. |
+| Only the terminals that can come next are tried, plus trivia and what the [conditions](#conditions) there name. | Where only `ID` is expected, `if` reads as an `ID`, even if the grammar uses `kw<"if">` elsewhere. |
+| The longest match wins. At equal length, a token beats trivia, and keywords and literals beat patterns. A keyword also beats trivia that starts with the same whole word. | Where `kw<"if">` and `ID` are both expected, `if` reads as the keyword and `iffy` as an `ID`. |
+| Other ties keep every match: each parse goes on with the token it accepts. | With `LOW : terminal<some(cr<"a-z">)>` and `NAME : terminal<some(cr<"a-zA-Z">)>`, `(ref<LOW> + lit<";">) | (ref<NAME> + lit<":">)` accepts `abc:`. |
+| A token is never split once read. Where the grammar is ambiguous, each possible parse reads its own token. When several reach the end, the first place where they read different tokens chooses the longer, then the keyword or literal; where their tokens begin apart, the grammar's order chooses. | `(lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">)` rejects `ab`. In `g(a<b<c>>::new)`, `>>` is two tokens for a type and one for an expression. |
 
 If two trivia terminals describe the same text, use one terminal everywhere.
 
@@ -284,9 +283,10 @@ For items that may repeat anywhere, collect them with
 ### Choosing between parses
 
 The parser keeps competing readings until the input or the grammar decides
-between them. When several complete parses
-remain, it compares their decisions from left to right, outer before nested.
-The grammar's order decides at the first difference.
+between them. When several complete parses remain, their
+[tokens](#tokens) decide first. Parses that read the same tokens are compared
+by their decisions from left to right, outer before nested. The grammar's
+order decides at the first difference.
 
 | Construct | Preferred decision |
 |---|---|
@@ -481,8 +481,8 @@ struct Expression
 Operators in one level share its precedence. `left` groups `(a op b) op c`,
 `right` groups `a op (b op c)`, and `nonassoc` reports a chain as a document
 error at the second operator. A prefix or postfix applies to everything that
-binds tighter than it, so an operand cannot start with a looser prefix or end
-with a looser postfix:
+binds tighter than it. A prefix may begin any operand, whatever stands on its
+left, and a postfix may end any operand, whatever stands on its right:
 
 | Input | Grouping |
 |---|---|
@@ -491,13 +491,18 @@ with a looser postfix:
 | `a < b < c` | A diagnostic at the second `<` |
 | `-a * b`, `-a++` | `(-a) * b`, `-(a++)` |
 | `not a < b and c` | `(not (a < b)) and c` |
-| `a < not b` | Rejected; write `a < (not b)` |
+| `a < not b`, `a * not b < c` | `a < (not b)`, `a * (not (b < c))` |
 
 `infix` does not add parentheses: if your language has them, `Primary` must
 read them, and a full expression starts again inside them. A single level
 needs no `levels`, but each argument of `levels` must be a level; a bare
 operator does not compile. A prefix and a binary operator can share a spelling,
 as in `-a` and `a - b`. Give each binary operator one precedence and associativity.
+Where a text reads both as a prefix operator with its operand and as a
+primary, the prefix operator is read. A token that begins a binary operator
+is read as that operator wherever the levels allow one. If it can also follow
+the expression, like a newline that ends a statement, put its operator in the
+loosest level of its `infix` rule.
 
 `Primary` must [build a node](#building-the-tree); a lone primary returns it.
 A binary operator builds a `T` and writes its members `left`, `op` and
@@ -625,7 +630,7 @@ that has a width (or to the start of input): its whitespace and comments.
 |---|---|
 | `gap::has(e)` | part of the gap matches `e` |
 | `gap::is(e)` | the whole gap matches `e` |
-| `gap::line` | the gap contains a line ending |
+| `gap::line` | the gap contains a line ending, outside an `indent_open` bracket |
 | `gap::none` | the gap is empty; even a comment with no spaces around it makes it false |
 
 `e` is a simple text pattern: a class, a literal, `eol` or a repetition of
@@ -677,10 +682,27 @@ text**: a tab is never expanded to spaces.
 Blank lines, form feeds included, and comment-only lines do not change levels
 when `NEWLINE` reads them.
 `indent_open` and `indent_close` name the brackets inside which indentation
-and `NEWLINE` are ignored: a spelling, a choice of spellings, or a terminal.
-A trivia terminal that reads a backslash followed by a line ending joins the
-two lines. [Indentation-sensitive languages](../recipes/indentation.md) shows
-a complete grammar.
+is ignored and line endings are blanks, to `NEWLINE` and to `gap::line`
+alike: a spelling, a choice of spellings, or a terminal. Inside an
+`indent_block` bracket, line endings count again, as in a language whose
+blocks may stand between parentheses:
+
+```cpp
+static constexpr auto indent_open = lit<"("> | lit<"[">;
+static constexpr auto indent_block = lit<"{">;
+static constexpr auto indent_close = lit<")"> | lit<"]"> | lit<"}">;
+```
+
+With these, `f({ a \n b })` holds two statements, and `f(a \n + b)` one
+expression. `indent_close` closes the innermost bracket, whatever its kind.
+`static constexpr auto indent_newline_in = ref<ML_COMMENT>;` names trivia
+whose line endings end a statement too, as Scala reads a block comment: where
+`NEWLINE` may come, such a trivia holding a line ending reads as one before
+the next token, if `NEWLINE` reads a line ending there.
+Indentation is read only outside every bracket. A trivia terminal that reads
+a backslash followed by a line ending joins the two lines.
+[Indentation-sensitive languages](../recipes/indentation.md) shows a complete
+grammar.
 
 ## Advanced rules
 

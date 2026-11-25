@@ -37,6 +37,13 @@ struct ModeLexer {
   [[nodiscard]] bool lives(std::uint16_t s) const {
     return s != 0 && (accepts(s) || ((onward[s >> 3] >> (s & 7)) & 1) != 0);
   }
+  // Whether mode `other` reads in `s` as this one does.
+  [[nodiscard]] bool alike(std::uint16_t other, std::uint16_t s) const {
+    const LexMode& o = t.modes[other];
+    const std::uint16_t accept = t.lexStates[s].accept;
+    return win.at(0, accept) == o.win.at(0, accept) &&
+           (((onward[s >> 3] ^ o.onward[s >> 3]) >> (s & 7)) & 1) == 0;
+  }
   // Whether the mode reads `terminal`.
   [[nodiscard]] bool reads(std::uint16_t terminal) const {
     return follow == nullptr || t.terminalTrivia[terminal] != Trivia::none ||

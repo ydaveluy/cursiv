@@ -77,7 +77,9 @@ struct Tasks : cursiv::GrammarSpec {
 - `indent_newline` names that terminal. After it, the indentation of the
   next line decides whether `INDENT`, `DEDENT` or nothing comes next.
 - Between `indent_open` and `indent_close`, line endings and indentation are
-  ignored, so an argument list can span lines.
+  ignored, so an argument list can span lines. A language whose blocks may
+  stand inside parentheses names their opening bracket in `indent_block`:
+  line endings count again inside it.
 
 ## The rules
 

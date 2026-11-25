@@ -1,9 +1,8 @@
-// The vertices of a graph that lie on a cycle, by an iterative Tarjan. The
+// The strongly connected components of a graph, by an iterative Tarjan. The
 // graph is in compressed rows: the edges of vertex `v` are `edges[starts[v]]`
 // up to `edges[starts[v + 1]]`, and an edge to no vertex is none.
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -51,23 +50,5 @@ constexpr void strong_components(std::span<const std::uint32_t> starts,
     }
   }
 }
-
-template <std::size_t N>
-struct StrongComponents {
-  std::array<bool, N> cyclic{};
-
-  static constexpr StrongComponents build(
-      std::span<const std::uint32_t> starts, std::span<const std::uint32_t> edges) {
-    StrongComponents out;
-    strong_components(starts, edges, [&](auto group) {
-      for (const auto v : group) {
-        out.cyclic[v] = group.size() > 1;
-        for (auto k = starts[v]; !out.cyclic[v] && k < starts[v + 1]; ++k)
-          out.cyclic[v] = edges[k] == v;
-      }
-    });
-    return out;
-  }
-};
 
 }  // namespace cursiv::engine

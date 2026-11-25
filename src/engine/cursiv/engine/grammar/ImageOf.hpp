@@ -335,12 +335,16 @@ consteval ImageGrammarDesc grammar_of() {
       class_of_bound<std::remove_cvref_t<decltype(GrammarSpec::w)>>::value;
   g.caseInsensitive = ResolveOverride<G>::case_insensitive;
   using Open = std::remove_cvref_t<decltype(G::indent_open)>;
+  using Block = std::remove_cvref_t<decltype(G::indent_block)>;
   using Close = std::remove_cvref_t<decltype(G::indent_close)>;
   if constexpr (!std::is_same_v<Open, Epsilon>) g.indentOpen = &kNode<V, Open>;
+  if constexpr (!std::is_same_v<Block, Epsilon>) g.indentBlock = &kNode<V, Block>;
   if constexpr (!std::is_same_v<Close, Epsilon>)
     g.indentClose = &kNode<V, Close>;
   if constexpr (!std::is_void_v<typename G::indent_newline>)
     g.indentNewline = &kRule<V, declared_of_t<typename G::indent_newline>>;
+  using NewlineIn = std::remove_cvref_t<decltype(G::indent_newline_in)>;
+  if constexpr (!std::is_same_v<NewlineIn, Epsilon>) g.indentNewlineIn = &kNode<V, NewlineIn>;
   return g;
 }
 

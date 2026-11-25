@@ -1,7 +1,6 @@
 #include "arithmetics/validation/ArithmeticsValidator.hpp"
 
 #include <cmath>
-#include <format>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -235,8 +234,7 @@ class Duplicates {
   static void say(const ast::AbstractDefinition& holder,
                   cursiv::ValidationAcceptor& accept) {
     accept
-        .error(holder,
-               std::format("Duplicate definition name: {}", holder.name))
+        .error(holder, "Duplicate definition name: " + std::string(holder.name))
         .property<&ast::AbstractDefinition::name>();
   }
 
@@ -271,18 +269,17 @@ void ArithmeticsValidator::checkMatchingParameters(
   // A parameter stands for a number, so it takes no argument.
   if (target->type == &cursiv::kAstTypeTag<ast::DeclaredParameter>) {
     if (!call.args.empty())
-      accept.error(
-          call, std::format("Parameter {} takes no arguments.", target->name));
+      accept.error(call, "Parameter " + std::string(target->name)
+                             + " takes no arguments.");
     return;
   }
   if (target->type != &cursiv::kAstTypeTag<ast::Definition>) return;
   const auto* const definition = static_cast<const ast::Definition*>(target);
   if (definition->args.size() == call.args.size()) return;
-  accept.error(
-      call,
-      std::format("Function {} expects {} parameters, but {} were "
-                  "given.",
-                  definition->name, definition->args.size(), call.args.size()));
+  accept.error(call, "Function " + std::string(definition->name) + " expects "
+                         + std::to_string(definition->args.size())
+                         + " parameters, but "
+                         + std::to_string(call.args.size()) + " were given.");
 }
 
 // A cycle of calls, reported with its path at each of its call sites in this
@@ -332,7 +329,7 @@ void ArithmeticsValidator::checkFunctionRecursion(
         cycle.push_back(above->entry);
       cycle.push_back(call);
       const std::string message =
-          std::format("Recursion is not allowed [{}]", print_cycle(cycle));
+          "Recursion is not allowed [" + print_cycle(cycle) + "]";
       // The closing call first, back to the one that entered the cycle.
       for (const ast::FunctionCall* const site : std::views::reverse(cycle))
         if (&cursiv::rootOf(*site) == &module)

@@ -14,7 +14,6 @@
 #include <condition_variable>
 #include <csignal>
 #include <exception>
-#include <format>
 #include <functional>
 #include <future>
 #include <limits>
@@ -83,7 +82,7 @@ void say_notification_threw(SharedCoreServices& shared, std::string_view method,
     shared.observabilitySink->publish(
         {.severity = ObservationSeverity::Warning,
          .code = ObservationCode::NotificationThrew,
-         .message = std::format("{} threw: {}", method, what),
+         .message = std::string(method) + " threw: " + what,
          .uri = {},
          .languageId = {}});
   } catch (...) {  // NOLINT(bugprone-empty-catch): nothing left to tell it to

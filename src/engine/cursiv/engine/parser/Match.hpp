@@ -56,6 +56,7 @@ class Matching {
     _any = any;
     _furthest = kNoMark;
     _made = 0;
+    _jumped = false;
     _todo.clear();
     _seen.clear();
     _calls.resize(1);
@@ -95,7 +96,7 @@ class Matching {
   }
   // A scanner can end beyond a DFA checkpoint that cannot reach that end itself.
   void end(std::uint32_t call, TextOffset at, bool jumped = false) {
-    if (jumped && _made == 1) ++_made;
+    if (jumped) _jumped = true;
     if (call != 0) return ended(call, at, at);
     if (_furthest == kNoMark || at > _furthest) _furthest = at;
   }
@@ -140,7 +141,7 @@ class Matching {
     return true;
   }
   // A failed search proves its visited suffixes empty. On a single thread
-  // an end beyond a visited place belongs to that suffix.
+  // with no scanner's end, an end beyond a visited place belongs to that suffix.
   void remember(Machine& m);
 
   std::vector<Asked> asked;
@@ -166,6 +167,11 @@ class Matching {
   }
   template <class Each>
   void add(Ranges& ranges, TextOffset first, TextOffset last, Each each);
+  // Whether the test of end `x` holds at `p`.
+  [[nodiscard]] static bool holds(Machine& m, const MatchEnd& x, const char* p);
+  // The bytes the scanner of exit `e` reads from `at`: none where it refuses.
+  [[nodiscard]] static std::size_t scanned(Machine& m, const MatchTables& a, const MatchExit& e,
+                                           const char* at);
   // Thread `th` takes exit `e` at `at`.
   void leave(Machine& m, const MatchTables& a, const MatchThread& th, const MatchExit& e,
              TextOffset at);
@@ -235,7 +241,10 @@ class Matching {
   std::uint64_t _endReads = 0;
   bool _any = false;
   TextOffset _furthest = kNoMark;
+  // The threads made, counted up to the first unchecked one.
   std::uint32_t _made = 0;
+  // Whether a scanner's end was found.
+  bool _jumped = false;
   std::uint32_t _steps = 0;
   std::vector<MatchThread> _todo;
   Table<MatchThread, bool> _seen;

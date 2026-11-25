@@ -33,6 +33,9 @@ keyword, use `option(flag<&Decl::isStatic>(kw<"static">))`.
 | `is a second indent or dedent terminal` | Declare each indentation terminal only once. |
 | `with its tag is not set on every path` | Set the `mark<>` on every path that reaches the `same<>` of its tag. |
 | `an indentation bracket is not one token` | Name each opening or closing bracket by its token, using a choice for several spellings. |
+| `indent_newline_in names a token that is not trivia` | Name only terminals, each listed in `ignored` or `hidden`, such as `ref<ML_COMMENT>`. |
+| `indent_newline_in names trivia, but indent_newline names no line terminal` | Declare `using indent_newline = NEWLINE;` with it. |
+| `is named by more than one of indent_open, indent_block and indent_close` | Name each bracket in one setting only: an opener, a block opener or a closer. |
 | `an implied token cannot be a bracket named by indent_open` | Spell the opening and closing indentation brackets in the input. |
 | `a gap test's pattern is not regular` | Simplify the pattern that tests the text between tokens. |
 | `that they cannot test` | In `gap::has` and `gap::is`, use literals, classes, `any`, sequences, alternatives or repetitions. A gap pattern cannot contain `through` or `eof`. |
@@ -50,7 +53,6 @@ in parentheses. The following excerpts identify the part to simplify.
 | `a keyword's test inside a condition`, `a condition inside a condition that reads too far`, `a condition with unbounded lookahead` | Shorten the lookahead or test it once in the enclosing rule. |
 | `too many conditions left to read`, `an end reached while a condition waits` | Reduce overlapping lookaheads or move the condition to a rule. |
 | `a closer with a guard or in either case`, `a condition inside a closer's condition`, `a closer that is no literal`, `a run with no closer` | Use a distinct literal delimiter or simplify the closing condition. |
-| `a closer too long to test`, `closers one inside the other` | Use a shorter, distinct delimiter. |
 
 ## Sections and conditions
 
@@ -122,14 +124,14 @@ for examples.
 
 | Message excerpt | What to change |
 |---|---|
-| `more than LR_MAX_STATES allows` | Raise the [state limit](cmake.md#cursiv_generate_language) to at least the minimum in the message, or set it to zero for no cap. |
+| `more LR states than LR_MAX_STATES allows` | Raise the [state limit](cmake.md#cursiv_generate_language), or set it to zero for no cap. |
 | `the grammar has too many terminals`, `the grammar has too many sets of terminals`, `the grammar has too many lexer modes` | Reuse terminal definitions and simplify alternatives that expect different sets of tokens. |
 | `the grammar has too many trivia scopes` | Reduce the number of distinct trivia configurations. The limit is 64. |
-| `the terminals are too large for one lexer`, `the terminals need more than 65534 lexer states`, `the terminals end in too many ways for one lexer` | Simplify overlapping terminal patterns or move choices between tokens into rules. |
+| `the terminals are too large for one lexer`, `the terminals need more than 65534 lexer states`, `the terminals end in too many ways for one lexer`, `the automaton has too many transitions` | Simplify overlapping terminal patterns or move choices between tokens into rules. |
 | `the terminals start in too many ways for one lexer` | Reuse terminal definitions and reduce the literals and keywords that begin with different text. |
 | `the grammar has too many ties of terminals` | Reduce the terminals that can read the same text in one place. |
 | `the grammar takes too many kinds of steps`, `the grammar takes too many unit reductions`, `a rule is called from too many kinds of places`, `a state has too many actions on one token` | The parser tables are full. Lower the [state limit](cmake.md#cursiv_generate_language), or merge rules that differ only in the node they build. |
-| `the grammar has too many records`, `the grammar publishes too many actions`, `the grammar names too many members and rules`, `the grammar names too many AST classes or members`, `the grammar writes too many members for a completion` | The grammar holds more rules, properties or directives than the tables can number. Factor repeated directives into named rules. |
+| `the grammar has too many records`, `the grammar publishes too many actions`, `the grammar names too many members and rules`, `the grammar names too many AST classes or members` | The grammar holds more rules, properties or directives than the tables can number; a grammar publishes at most 16384 actions. Factor repeated directives into named rules. |
 | `a reference narrows to too many classes` | Narrow the target types of the reference, or give them a common base. |
 
 For a limit on rules, properties or actions, factor repeated directives into

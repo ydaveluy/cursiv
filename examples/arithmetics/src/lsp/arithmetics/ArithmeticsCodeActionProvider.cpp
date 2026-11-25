@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <format>
 #include <string>
 #include <utility>
 #include <vector>
@@ -69,7 +68,7 @@ void ArithmeticsCodeActionProvider::appendCodeActions(
     about.message = diagnostic.message;
 
     lsp::CodeAction action;
-    action.title = std::format("Replace with constant {}", written);
+    action.title = "Replace with constant " + written;
     action.kind = lsp::CodeActionKind::QuickFix;
     action.diagnostics = lsp::Array<lsp::Diagnostic>{std::move(about)};
     action.isPreferred = true;

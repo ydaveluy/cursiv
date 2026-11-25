@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <limits>
 #include <span>
 #include <string>
@@ -119,8 +118,8 @@ JsonValue::Array near_names(const Document& document,
       });
   for (const Near& n : near)
     rows.push_back(detail::make_action_row(
-        std::format("Replace with '{}'", n.name), range, std::string(n.name),
-        document.buildRevision));
+        "Replace with '" + std::string(n.name) + "'", range,
+        std::string(n.name), document.buildRevision));
   return rows;
 }
 

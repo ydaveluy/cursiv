@@ -1,9 +1,9 @@
 #pragma once
 
 #include <exception>
-#include <format>
 #include <new>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 #include "cursiv/utils/Cancellation.hpp"
@@ -25,11 +25,11 @@ decltype(auto) language_call(std::string_view operation, Call&& call) {
   } catch (const std::bad_alloc&) {
     throw;
   } catch (const std::exception& error) {
-    throw LanguageServiceError(
-        std::format("{} failed: {}", operation, error.what()));
+    throw LanguageServiceError(std::string(operation) +
+                               " failed: " + error.what());
   } catch (...) {
-    throw LanguageServiceError(
-        std::format("{} failed: unknown exception", operation));
+    throw LanguageServiceError(std::string(operation) +
+                               " failed: unknown exception");
   }
 }
 

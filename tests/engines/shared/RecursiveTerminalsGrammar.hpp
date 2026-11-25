@@ -183,6 +183,10 @@ struct Base : cursiv::GrammarSpec {
       : terminal<some(lit<"x">) + lit<"y"> + option(ref<Variable>)> {};
   struct BigCount : terminal<repeat<100000>(lit<"z">) + option(ref<BigCount>)> {
   };
+  // Terminals named again among their own arms read what their other arms read.
+  struct Ping;
+  struct Pong : terminal<lit<"o"> | (!lit<"x"> + ref<Ping>)> {};
+  struct Ping : terminal<lit<"i"> | ref<Pong>> {};
 
   // A shorter endpoint of the callee is needed for the caller's suffix.
   struct Suffix : terminal<ref<Run> + lit<"a"> + lit<"!">> {};
@@ -211,6 +215,7 @@ struct Base : cursiv::GrammarSpec {
                                   (lit<"counted:"> + Read<Counted>) |
                                   (lit<"variable:"> + Read<Variable>) |
                                   (lit<"bigcount:"> + Read<BigCount>) |
+                                  (lit<"ping:"> + Read<Ping>) |
                                   (lit<"suffix:"> + Read<Suffix>) |
                                   (lit<"ambsuffix:"> + Read<AmbiguousSuffix>) |
                                   (lit<"wrapped:"> + Read<Wrapped>) |

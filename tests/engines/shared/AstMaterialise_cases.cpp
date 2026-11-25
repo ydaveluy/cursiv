@@ -308,11 +308,13 @@ void run() {
   CHECK(var != nullptr && var->name == "f");
 
   // A call whose test fails after it read its text keeps its node, and only
-  // the repair says so: the holder takes it.
+  // the repair says so: the holder takes it. Alone, the call ends no text: the
+  // token its test asks for is read by nothing, so no insertion mends it.
   const Reader lr = reader({});
   for (const char* text : {"mat:givenup:x n a ? ;", "mat:passed:n a ?"}) {
     const auto result = lr.parser->parse(text);
-    CHECK(result.accepted && !result.diagnostics.empty());
+    CHECK(result.accepted == (std::string_view(text) == "mat:givenup:x n a ? ;") &&
+          !result.diagnostics.empty());
     CHECK(result.value != nullptr ||
           result.error == cursiv::AstBuildError::NoEntry);
     for (const cursiv::ParseDiagnostic& d : result.diagnostics)

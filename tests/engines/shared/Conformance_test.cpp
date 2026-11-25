@@ -13,10 +13,17 @@
 #include <vector>
 
 #include "conformancelr/generated/Suite/Module.hpp"
+#include "conformancelr/generated/Suite/Table.hpp"
+#include "cursiv/engine/parser/Machine.hpp"
+#include "cursiv/engine/parser/Parse.hpp"
+#include "cursiv/engine/parser/Split.hpp"
+#include "cursiv/engine/recovery/Repair.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstBuildError.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
+#include "cursiv/syntax-tree/Cst.hpp"
+#include "cursiv/syntax-tree/CstBuilder.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/ParseResult.hpp"
 #include "cursiv/Check.hpp"
@@ -85,6 +92,28 @@ void pick(const Entry& entry, std::string_view text, std::string_view literal,
       at);
 }
 
+// The steps the states take ahead to read `text`, or to repair it once they
+// refuse it.
+std::uint64_t steps(std::string_view text) {
+  namespace engine = cursiv::engine;
+  cursiv::Cst cst(text);
+  cursiv::CstBuilder builder(cst);
+  engine::Machine m(tconformance::generated::Suite::kTables, cst.text(), builder.stream(),
+                    cursiv::kNoCancel);
+  engine::reserve_for(builder.stream(), text.size());
+  if (engine::run(m) == engine::Exit::accepted) return m.explored;
+  const auto before = m.explored;
+  CHECK(engine::repair(m, builder));
+  return m.explored - before;
+}
+
+// A chain of `count` suffixes, the name of suffix `left` left out.
+std::string chain_without(int count, int left) {
+  std::string text = "chain:a";
+  for (int i = 0; i < count; ++i) text += i == left ? "." : ".b";
+  return text;
+}
+
 }  // namespace
 
 int main() {
@@ -103,14 +132,15 @@ int main() {
   pick(keywordTieBoundary, "ifx", "if", "");
   const Entry firstArm{"firstarm:"};
   tree<ast::First>(firstArm, "if then", [](const ast::First&) { return true; });
-  // A misspelt word after the shared head and name leaves every statement
-  // open: it is read as the keyword it misspells, of the second as of the
-  // first.
+  // A misspelt word after the shared head and a name of one part or more
+  // leaves every statement open: it is read as the keyword it misspells, of
+  // the second as of the first.
   const Entry sharedHead{"sharedhead:"};
   won(sharedHead, "ev a.b early", "a.b", "");
   won(sharedHead, "ev a.b late", "", "a.b");
   for (const auto& [text, token, name] :
-       {std::tuple{"ev a.b eirly", "a.b", ""}, std::tuple{"ev a.b lite", "", "a.b"}}) {
+       {std::tuple{"ev a.b eirly", "a.b", ""}, std::tuple{"ev a.b lite", "", "a.b"},
+        std::tuple{"ev a eirly", "a", ""}, std::tuple{"ev a lite", "", "a"}}) {
     const std::string source = sharedHead.source(text);
     const auto r = conformance_test::parser().parse(source);
     const auto* node = exactly<ast::Won>(r);
@@ -137,16 +167,16 @@ int main() {
           r.diagnostics[0].end == source.size());
   }
   // A name that reads as that word misspelt, before the word itself: the
-  // text does not read up to it alone, and the fault past the statement is
-  // repaired where it stands.
+  // first statement reads `late` as a name, its own reading, and the keyword
+  // it waits for is inserted at the end.
   {
     const std::string source = sharedTags.source("ev a.b eirly x late late");
     const auto r = conformance_test::parser().parse(source);
     const auto* node = exactly<ast::Won>(r);
-    CHECK(r.accepted && node != nullptr && node->token.empty() && node->name == "a.b");
+    CHECK(r.accepted && node != nullptr && node->token == "a.b" && node->name.empty());
     CHECK(r.diagnostics.size() == 1 &&
-          r.diagnostics[0].kind == cursiv::DiagnosticKind::Deleted &&
-          r.diagnostics[0].end == source.size());
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted &&
+          r.diagnostics[0].begin == source.size());
   }
   // The misspelt keyword of the third reads as the name the two others
   // begin with: no statement is chosen when it is refused.
@@ -173,6 +203,18 @@ int main() {
     CHECK(r.diagnostics.size() == 1 &&
           r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced);
   }
+  // A name that reads as `done` misspelt, past the split the statements part
+  // at: the text cut before it leaves the first statement there, which does
+  // not read up to the token refused, so the states read on to it again.
+  {
+    const std::string source = convergedArms.source("ev a b dnoe upto ; d e f end ; g");
+    const auto r = conformance_test::parser().parse(source);
+    const auto* node = exactly<ast::Won>(r);
+    CHECK(r.accepted && node != nullptr && node->token.empty() && node->name == "a");
+    CHECK(r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Deleted &&
+          r.diagnostics[0].end == source.size());
+  }
   // Two lists share their names up to their last word, each name read two
   // ways alike: what a caret at their end is offered costs their length.
   {
@@ -187,6 +229,29 @@ int main() {
                                               static_cast<cursiv::TextOffset>(source.size()));
     CHECK(std::chrono::steady_clock::now() - begin < std::chrono::seconds(8 * kSlowdown));
     CHECK((offers == std::vector<std::string>{"!", "ID", "early", "late"}));
+  }
+  // In a chain whose readings part at the first suffix, a repair that takes
+  // an action at each split before a name left out reads no text ahead at
+  // them again as it writes its path.
+  CHECK(steps(chain_without(40, 20)) < 17500);
+  // Each level reads its block by either of two rules and goes on alike: the
+  // first rule is elected at each level, and the readings that part there
+  // meet again, so a level costs no more than the levels it closes.
+  {
+    const Entry levels{"levels:"};
+    const auto deep = [](int depth) {
+      std::string text;
+      for (int i = 0; i < depth; ++i) text += "r {} ";
+      return text + "r e";
+    };
+    tree<ast::Level>(levels, deep(4), [](const ast::Level& n) {
+      int firsts = 0;
+      const ast::Level* at = &n;
+      for (; at->next != nullptr; at = at->next)
+        firsts += at->first != nullptr && at->second == nullptr;
+      return firsts == 4 && at->first == nullptr && at->second == nullptr;
+    });
+    CHECK(steps(levels.source(deep(16))) < 5 * steps(levels.source(deep(8))));
   }
   // A name is no number and no capitalised word, whatever its length; one
   // that only begins as either is a name.
@@ -214,6 +279,84 @@ int main() {
           r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced &&
           r.diagnostics[0].end == source.size());
   }
+  // A rule whose test names a keyword and leads to a state that only reduces
+  // reads a misspelt keyword as the keyword: one replacement mends `a thn b`.
+  const Entry namedAhead{"namedahead:"};
+  tree<ast::Doc>(namedAhead, "a then b", [](const ast::Doc&) { return true; });
+  {
+    const std::string source = namedAhead.source("a thn b");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Replaced);
+  }
+  // A literal left out before a rule whose test names it is inserted there,
+  // and read where the rule after the test reads it.
+  const Entry insertedAhead{"insertedahead:"};
+  tree<ast::Doc>(insertedAhead, "a . b;", [](const ast::Doc&) { return true; });
+  {
+    const std::string source = insertedAhead.source("a b;");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted);
+  }
+  // Two statements on one line of a block are parted by a semicolon, which
+  // costs no more than a brace that would close the block early.
+  const Entry braced{"braced:"};
+  const auto inserted = [](const cursiv::ParseDiagnostic& d) {
+    const auto spellings = conformance_test::parser().getGrammar().terminalSpellings(
+        static_cast<std::uint16_t>(d.element));
+    return d.kind == cursiv::DiagnosticKind::Inserted && !spellings.empty()
+               ? spellings.front()
+               : std::string_view{};
+  };
+  tree<ast::Doc>(braced, "{ a\n go b }", [](const ast::Doc&) { return true; });
+  {
+    const std::string source = braced.source("{ a b\n  c\n  d e\n}");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.diagnostics.size() == 2 && inserted(r.diagnostics[0]) == ";" &&
+          inserted(r.diagnostics[1]) == ";");
+  }
+  // A block the text leaves open is closed at its end: no repair moves the
+  // statements written in it out of it.
+  {
+    const std::string source = braced.source("{\n  go a\n  b");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.diagnostics.size() == 1 && inserted(r.diagnostics[0]) == "}" &&
+          r.diagnostics[0].begin == source.size());
+  }
+  // A value past a field's last part is dropped: a field invented before it
+  // completes nothing of the text, so its tokens are not free, and the search
+  // does not wander through every field it could invent.
+  {
+    const Entry slots{"slots:"};
+    const std::string source = slots.source("{ o ka kb kc kd a optional = \"x\" }");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind != cursiv::DiagnosticKind::Bounded &&
+          r.diagnostics[0].begin == source.find('='));
+  }
+  // A test past the token in hand reads an inserted token as itself: the text
+  // cut after the postfix name is closed.
+  {
+    const Entry postfixed{"postfixed:"};
+    tree<ast::Doc>(postfixed, "(a b);", [](const ast::Doc&) { return true; });
+    const std::string source = postfixed.source("(a b");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted);
+  }
+  // A comment left open at the end is read as one and the brace inserted: a
+  // name invented before it would leave more to insert at the end. However
+  // long, the comment is walked once, whatever mode reaches it.
+  {
+    const Entry divided{"divided:"};
+    for (const std::string& text : {std::string("{ a ; /* b"), "{ a ; /* " + std::string(1 << 20, 'b')}) {
+      const std::string source = divided.source(text);
+      const auto r = conformance_test::parser().parse(source);
+      CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
+            r.diagnostics[0].begin == source.find("/*"));
+    }
+  }
   const Entry elected{"elected:"};
   tree<ast::First>(elected, "1 if;", [](const ast::First&) { return true; });
   tree<ast::Second>(elected, "1 if:", [](const ast::Second&) { return true; });
@@ -224,6 +367,14 @@ int main() {
   tree<ast::Tally>(elected, "4 if if", [](const ast::Tally& n) {
     return n.turns.size() == 2 && !n.tail;
   });
+  // A token a repair inserts is the terminal it names, though others read the
+  // same text: the text cut after `1` ends with one.
+  {
+    const std::string source = elected.source("1");
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted);
+  }
   // The election comes first: its refused conversion is reported and no other
   // reading is tried.
   {
@@ -512,26 +663,38 @@ int main() {
            named(n.statements[1], "b");
   });
 
+  // Each parse reads its own token: `ab` is one where `ab` stands next, two
+  // where `a` does. The second takes at most two `xa`.
   const Entry many{"callermany:"};
   const Entry upToTwo{"uptotwo:"};
-  for (const Entry* shared : {&many, &upToTwo}) {
-    for (const std::string_view text :
-         {"xab", "xaxab", "xa xab", "xaxa xab", "xaxaxab"})
-      expect(*shared, text, false);
-    expect(*shared, "xa xab y", true);
+  for (const Entry* shared : {&many, &upToTwo})
+    for (const std::string_view text : {"xab", "xaxab", "xa xab", "xa xab y"})
+      expect(*shared, text, true);
+  for (const std::string_view text : {"xaxa xab", "xaxaxab"}) {
+    expect(many, text, true);
+    expect(upToTwo, text, false);
+  }
+  // Both parses read the whole text: where their tokens differ, the lexer's
+  // choice elects, whatever the grammar's order.
+  tree<ast::Second>(Entry{"twotokens:"}, "x q ab", [](const ast::Second&) { return true; });
+  tree<ast::Second>(Entry{"twotokensswapped:"}, "x q ab", [](const ast::Second&) { return true; });
+  tree<ast::First>(Entry{"keywordorname:"}, "x q if", [](const ast::First&) { return true; });
+  tree<ast::Second>(Entry{"keywordorname:"}, "x q of", [](const ast::Second&) { return true; });
+  // Tokens that begin apart are no choice of the lexer: the grammar's order elects.
+  tree<ast::First>(Entry{"lineend:"}, "x q\na", [](const ast::First&) { return true; });
+  // Before a `b`, a caret is offered `a` by the parse that reads it so,
+  // though the other reads `ab` there.
+  {
+    const std::string source = Entry{"twotokens:"}.source("x q b");
+    const auto at = static_cast<cursiv::TextOffset>(source.size() - 1);
+    CHECK((caret_offers::offered(conformance_test::parser(), source, at) ==
+           std::vector<std::string>{"a", "ab"}));
   }
   {
-    const cursiv::Parser& parser = conformance_test::parser();
     const std::string source = many.source("xaxb");
-    const auto parsed = parser.parse(source);
-    std::vector<cursiv::NextFeature> next;
     const auto at = static_cast<cursiv::TextOffset>(many.prefix.size() + 3u);
-    parser.nextFeaturesAt(parsed.cst(), at, at, next);
-    CHECK(next.size() == 1);
-    for (const cursiv::NextFeature& f : next) {
-      const auto spellings = parser.getGrammar().terminalSpellings(f.feature);
-      CHECK(spellings.size() == 1 && spellings.front() == "ab");
-    }
+    CHECK((caret_offers::offered(conformance_test::parser(), source, at) ==
+           std::vector<std::string>{"a", "ab"}));
   }
 
   // The caret reads a path as the parse does: the longer `TEXT` a merged

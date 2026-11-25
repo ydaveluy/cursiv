@@ -108,7 +108,7 @@ letter. The build skips missing files. See
 Leave `LR_MAX_STATES` at its default of zero for no state cap. If a
 large grammar is expensive to build, try a cap such as `LR_MAX_STATES 3000`
 on that language or `-DCURSIV_LR_MAX_STATES=3000` for the whole project.
-Generation reports the minimum if the cap is too low. Compare build time,
+Generation refuses a grammar with more states than the cap. Compare build time,
 parse time and the resulting trees on representative documents.
 
 The generator compiles the grammar with the compile definitions and include

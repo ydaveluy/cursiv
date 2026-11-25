@@ -23,6 +23,9 @@ namespace {
 
 using detail::FieldContent;
 
+static_assert(kActionLimit <= kCaretNode >> 16 && kActionLimit <= kNoAction,
+              "an action's number must fit under the kind bits of a completion word");
+
 bool holds_nodes(const MemberDesc& member) {
   return member.content == FieldContent::node || member.content == FieldContent::variant;
 }
@@ -277,8 +280,8 @@ class Emitter {
         begun(site.from, nt);
         steps(site.from, site.target, site.hops, turns[nt]);
       }
-    if (_rows.size() >= 0x4000 || sets.size() > 0xFFFF)
-      throw Refused("the grammar writes too many members for a completion");
+    if (sets.size() > 0xFFFF)
+      throw Refused("the grammar has too many sets of terminals for a completion");
     std::map<std::vector<std::uint32_t>, std::uint32_t> lists;
     std::vector<std::uint32_t> caretOf, caretAt{0}, caretWord;
     for (std::vector<std::uint32_t>& list : read) {
@@ -468,23 +471,26 @@ class Emitter {
             "  template <::std::uint16_t C>\n"
             "  static constexpr ::cursiv::engine::AstFill fill = nullptr;\n};\n";
     // A node made or adopted takes the writes of its class's members and of
-    // its bases'.
+    // its bases'. Every action that builds a class shares one fill of it.
     std::vector<std::size_t> writes;
+    std::vector<std::string> fills(_types.size());
     for (std::size_t action = 0; action < _rows.size(); ++action) {
       const RowDesc& built = *_rows[action];
       if (!used[action] || (built.kind != WriteKind::create && built.kind != WriteKind::climb &&
                             built.kind != WriteKind::close && built.kind != WriteKind::nest))
         continue;
       const std::uint16_t type = _typeNumber.at(built.type);
-      writes = _writes[type];
-      for (const std::uint16_t base : _bases[type])
-        writes.insert(writes.end(), _writes[base].begin(), _writes[base].end());
-      std::ranges::sort(writes);
+      if (fills[type].empty()) {
+        writes = _writes[type];
+        for (const std::uint16_t base : _bases[type])
+          writes.insert(writes.end(), _writes[base].begin(), _writes[base].end());
+        std::ranges::sort(writes);
+        fills[type] = "&::cursiv::engine::fill_class<Does, " + std::to_string(action);
+        for (const std::size_t w : writes) fills[type] += ", " + std::to_string(w);
+        fills[type] += ">";
+      }
       _out += "template <>\nconstexpr ::cursiv::engine::AstFill Does::fill<" +
-              std::to_string(action) + "> =\n    &::cursiv::engine::fill_class<Does, " +
-              std::to_string(action);
-      for (const std::size_t w : writes) _out += ", " + std::to_string(w);
-      _out += ">;\n";
+              std::to_string(action) + "> =\n    " + fills[type] + ";\n";
     }
     _out += "template <::std::uint16_t... Is>\n"
             "constexpr auto R = &::cursiv::engine::record<Does, Is...>;\n\n";

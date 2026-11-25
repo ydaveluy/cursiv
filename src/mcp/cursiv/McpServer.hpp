@@ -4,8 +4,8 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdio>
 #include <functional>
-#include <iosfwd>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -74,8 +74,7 @@ class McpServer {
 
   // Serves newline-delimited JSON until EOF, draining accepted requests.
   // Returns false when a response could not be written.
-  [[nodiscard]] bool serveStdio(std::istream& input,
-                                std::ostream& output) const;
+  [[nodiscard]] bool serveStdio(std::FILE* input, std::FILE* output) const;
 
  private:
   template <class Handler>

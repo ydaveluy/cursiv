@@ -468,6 +468,20 @@ struct G : joined::Words {
 };
 }  // namespace ending
 
+// A directive takes no suite: the deeper lines after it are no quote of the
+// document's, which `!indent` refuses as `!ref<INDENT>` does.
+namespace bare {
+struct G : joined::Words {
+  struct Line : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>) + ref<NEWLINE>)> {};
+  struct Directive : rule<create<ast::Node>(kw<"dir"> + assign<&ast::Node::name>(ref<ID>) +
+                                            ref<NEWLINE> + !indent)> {};
+  struct Quote : rule<create<ast::Node>(ref<INDENT> + some(append<&ast::Node::body>(ref<Line>)) +
+                                        ref<DEDENT>)> {};
+  struct Root : rule<create<ast::Node>(
+                    some(append<&ast::Node::body>(ref<Directive> | ref<Line> | ref<Quote>)))> {};
+};
+}  // namespace bare
+
 namespace synthetic {
 struct Cases : G {
   struct Case : rule<ref<G::Case> | (kw<"fork"> + ref<fork::G::Root>) |
@@ -475,7 +489,8 @@ struct Cases : G {
                      (kw<"dotted"> + ref<dotted::G::Root>) |
                      (kw<"heads"> + ref<heads::G::Root>) |
                      (kw<"marked"> + ref<marked::G::Root>) |
-                     (kw<"ending"> + ref<ending::G::Root>)> {};
+                     (kw<"ending"> + ref<ending::G::Root>) |
+                     (kw<"bare"> + ref<bare::G::Root>)> {};
   using entry = Case;
 };
 }  // namespace synthetic

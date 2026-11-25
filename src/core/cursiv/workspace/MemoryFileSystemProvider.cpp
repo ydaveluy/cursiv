@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -32,7 +31,7 @@ namespace {
     std::string_view uri) {
   const auto it = files.find(normalizeUri(uri));
   if (it == files.end())
-    throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
+    throw FileSystemError("cursiv: cannot read '" + std::string(uri) + "'");
   return it->second;
 }
 
@@ -61,7 +60,7 @@ FileSystemNode MemoryFileSystemProvider::stat(std::string_view uri) const {
   std::string key = normalizeUri(uri);
   if (_files.contains(key)) return {true, false, std::move(key)};
   if (isFolder(key)) return {false, true, std::move(key)};
-  throw FileSystemError(std::format("cursiv: nothing at '{}'", uri));
+  throw FileSystemError("cursiv: nothing at '" + std::string(uri) + "'");
 }
 
 bool MemoryFileSystemProvider::exists(std::string_view uri) const {

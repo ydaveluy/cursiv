@@ -5,6 +5,7 @@
 
 #include "cursiv/Check.hpp"
 #include "cursiv/engine/grammar/Lower.hpp"
+#include "cursiv/engine/grammar/Optimize.hpp"
 #include "cursiv/engine/grammar/View.hpp"
 #include "cursiv/engine/grammar/WritesOnce.hpp"
 #include "cursiv/engine/parser/Pack.hpp"
@@ -16,6 +17,10 @@ using namespace cursiv::engine::gen;
 struct Postfix : cursiv::Extends<cursiv::AstNode> {
   Postfix* child = nullptr;
   bool marked = false;
+};
+
+struct Block : cursiv::Extends<cursiv::AstNode> {
+  std::vector<Postfix*> items;
 };
 
 struct SharedGroup : cursiv::GrammarSpec {
@@ -148,6 +153,28 @@ void an_unbounded_condition_is_read_by_one_matcher_thread() {
                             [](const auto& e) { return e.action == MatchAction::end; }));
 }
 
+struct NamedClosers : cursiv::GrammarSpec {
+  struct Close : terminal<lit<"*/">> {};
+  struct Again : terminal<lit<"*/"> | ref<Again>> {};
+  template <auto Closer>
+  struct Grammar : cursiv::GrammarSpec {
+    struct Comment : terminal<through(lit<"/*">, Closer)> {};
+    struct Root : rule<create<Postfix>(ref<Comment> | ref<Close>)> {};
+    using entry = Root;
+  };
+};
+
+// The lexer's table where a comment closes on `Closer`.
+template <auto Closer>
+std::vector<std::uint16_t> closing_table() {
+  using G = NamedClosers::Grammar<Closer>;
+  auto image = grammar_image<View<G>>();
+  const auto cfg = lower(image, kLowerDesc<G>);
+  LexAutomatonBuilder lexer(image);
+  for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t) lexer.add(t, cfg.terminals[t]);
+  return lexer.build(cfg.terminals.size()).next;
+}
+
 struct MarkedSection : cursiv::GrammarSpec {
   struct Root : rule<create<Postfix>(flag<&Postfix::marked>(lit<"x">))> {};
   using entry = Root;
@@ -160,7 +187,6 @@ struct SectionWrites : cursiv::GrammarSpec {
 
 struct Binary : cursiv::Extends<cursiv::AstNode> {
   Binary* child = nullptr;
-  Binary* right = nullptr;
   std::string_view op;
 };
 
@@ -169,17 +195,6 @@ struct AliasedOperands : cursiv::GrammarSpec {
   struct E : infix<Primary, Binary, left(lit<"+">), &Binary::child, &Binary::op, &Binary::child> {};
   using entry = E;
 };
-
-struct NullableLead : cursiv::GrammarSpec {
-  struct E;
-  struct Prefix : rule<option(lit<"prefix:">)> {};
-  struct MaybePrefix : rule<ref<Prefix>> {};
-  struct Primary : rule<create<Binary>(lit<"name">) |
-      create<Binary>(ref<MaybePrefix> + assign<&Binary::child>(ref<E>) + lit<"?">)> {};
-  struct E : infix<Primary, Binary, left(lit<"+">), &Binary::child, &Binary::op, &Binary::right> {};
-  using entry = E;
-};
-static_assert(cursiv::engine::Facts<NullableLead>::stage::graph::cyclic<NullableLead::E>);
 
 template <class G>
 void rejects_second_write(std::string_view message) {
@@ -216,12 +231,40 @@ template <class G>
 Packed plain_tables() {
   auto image = grammar_image<View<G>>();
   auto cfg = lower(image, kLowerDesc<G>);
+  optimize(cfg);
   LexAutomatonBuilder lexer(image);
   for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t) lexer.add(t, cfg.terminals[t]);
   auto dfa = lexer.build(cfg.terminals.size());
   const auto rivals = lex_rivals(image, cfg, dfa);
   const auto lr = build_lr1(cfg, rivals.takes, Bits(cfg.terminals.size()));
   return pack(image, cfg, std::move(dfa), rivals.takes, lr);
+}
+
+struct Cycles : cursiv::GrammarSpec {
+  struct Node : rule<create<Postfix>(option(lit<"a">))> {};
+  struct Solid : rule<create<Postfix>(lit<"a">)> {};
+  struct SilentList : rule<create<Block>(many(option(lit<"a">)))> {};
+  struct NodeList : rule<create<Block>(many(append<&Block::items>(ref<Node>)))> {};
+  struct SolidList : rule<create<Block>(many(append<&Block::items>(ref<Solid>)))> {};
+  struct NodeOnce : rule<create<Block>(append<&Block::items>(ref<Node>) + lit<";">)> {};
+  struct Back;
+  struct Unit : rule<ref<Back>> {};
+  struct Back : rule<ref<Unit> | lit<"x">> {};
+};
+
+template <class R>
+struct CyclesGrammar : Cycles { using entry = R; };
+
+// Whether the grammar is refused for a cycle of rules that read no input.
+template <class R>
+bool a_cycle_of_rules_is_refused() {
+  try {
+    (void)plain_tables<CyclesGrammar<R>>();
+    return false;
+  } catch (const Refused& error) {
+    CHECK(std::string_view(error.what()).find("a cycle of rules reads no input") != std::string_view::npos);
+    return true;
+  }
 }
 
 struct UnitChains : cursiv::GrammarSpec {
@@ -400,6 +443,33 @@ void a_shared_reader_needs_a_terminal_that_separates_its_arms() {
   for (const auto& [row, id] : apart.shifts) CHECK(row[cfg.newline] == 1);
 }
 
+struct Spelled : cursiv::GrammarSpec {
+  struct Root : rule<create<Postfix>(lit<"go">)> {};
+  using entry = Root;
+};
+
+struct SpelledFolded : cursiv::GrammarSpec {
+  struct Root : rule<create<Postfix>(ikw<"go">)> {};
+  using entry = Root;
+};
+
+// Whether lowering `G` with its rows padded to `rows` refuses for its actions.
+template <class G>
+bool refuses_too_many_actions(std::size_t rows) {
+  auto image = grammar_image<View<G>>();
+  cursiv::engine::LowerDesc desc = kLowerDesc<G>;
+  std::vector<const cursiv::engine::RowDesc*> padded(desc.rows.begin(), desc.rows.end());
+  padded.resize(std::max(rows, padded.size()), padded.front());
+  desc.rows = padded;
+  try {
+    (void)lower(image, desc);
+    return false;
+  } catch (const Refused& error) {
+    CHECK(std::string_view(error.what()).find("too many actions") != std::string_view::npos);
+    return true;
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -416,6 +486,12 @@ int main() {
   overlapping_runs_keep_their_own_matcher_entry(false);
   overlapping_runs_keep_their_own_matcher_entry(true);
   an_unbounded_condition_is_read_by_one_matcher_thread();
+  using N = NamedClosers;
+  // A closer behind a doc or a terminal's name is read as its literal is.
+  CHECK(closing_table<N::lit<"*/">.doc<"Ends the comment.">()>() ==
+        closing_table<N::lit<"*/">>());
+  CHECK(closing_table<N::ref<N::Close>>() == closing_table<N::lit<"*/">>());
+  CHECK(closing_table<N::ref<N::Again>>() == closing_table<N::lit<"*/">>());
   CHECK(modifier_counts<SharedGroup::Once>() == modifier_counts<SharedGroup::Twice>());
   rejects_second_write<UnorderedWrites>("'marked' twice");
   rejects_second_write<AliasedOperands>("'child' twice");
@@ -437,5 +513,14 @@ int main() {
   CHECK(split_size(128) <= 2 * split_size(64));
   a_ceiling_refines_choices_without_exceeding_it();
   a_shared_reader_needs_a_terminal_that_separates_its_arms();
+  CHECK(a_cycle_of_rules_is_refused<Cycles::SilentList>());
+  CHECK(a_cycle_of_rules_is_refused<Cycles::NodeList>());
+  CHECK(!a_cycle_of_rules_is_refused<Cycles::SolidList>());
+  CHECK(!a_cycle_of_rules_is_refused<Cycles::NodeOnce>());
+  CHECK(a_cycle_of_rules_is_refused<Cycles::Unit>());
+  CHECK(refuses_too_many_actions<Spelled>(kActionLimit + 1));
+  CHECK(!refuses_too_many_actions<Spelled>(kActionLimit));
+  CHECK(!refuses_too_many_actions<SpelledFolded>(kActionLimit - 1));
+  CHECK(refuses_too_many_actions<SpelledFolded>(kActionLimit));
   return cursiv::test::report("AdaptiveLr_test");
 }

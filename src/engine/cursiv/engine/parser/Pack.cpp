@@ -57,6 +57,34 @@ std::vector<std::uint8_t> runs_of(const auto& dfa, RunSets& runs, auto canSkip) 
   return out;
 }
 
+// Refuses a nonterminal that derives itself with only symbols beside it that
+// can read nothing: that cycle reads no input.
+void refuse_empty_cycles(const Cfg& cfg, const std::vector<bool>& nullable) {
+  const std::size_t nnts = cfg.nonterminals;
+  std::vector<std::vector<std::uint32_t>> parents(nnts);
+  std::vector<std::uint32_t> waits(nnts, 0);
+  for (const Production& q : cfg.productions) {
+    const auto solid = std::ranges::count_if(
+        q.rhs, [&](Symbol s) { return is_terminal(s) || !nullable[index_of(s)]; });
+    for (const Symbol s : q.rhs) {
+      if (is_terminal(s) || solid > !nullable[index_of(s)]) continue;
+      parents[index_of(s)].push_back(q.lhs);
+      ++waits[q.lhs];
+    }
+  }
+  std::vector<std::uint32_t> work;
+  for (std::uint32_t nt = 0; nt < nnts; ++nt)
+    if (waits[nt] == 0) work.push_back(nt);
+  std::size_t done = 0;
+  for (; !work.empty(); ++done) {
+    const std::uint32_t nt = work.back();
+    work.pop_back();
+    for (const std::uint32_t parent : parents[nt])
+      if (--waits[parent] == 0) work.push_back(parent);
+  }
+  if (done != nnts) throw Refused("a cycle of rules reads no input");
+}
+
 // What the records a production closes over can be: the entries of a lone
 // record it takes over, and whether it can close over nothing or over several.
 std::vector<std::set<std::uint32_t>> record_shapes(Cfg& cfg, Packed& out) {
@@ -120,11 +148,9 @@ std::vector<std::set<std::uint32_t>> record_shapes(Cfg& cfg, Packed& out) {
   // Per nonterminal, the entries its record carries where it is one record.
   std::vector<std::set<std::uint32_t>> records(nnts), childrenOf(nprods);
   out.shapes.resize(nprods);
-  std::size_t done = 0;
   while (!work.empty()) {
     const std::uint32_t nt = work.back();
     work.pop_back();
-    ++done;
     for (const std::uint32_t p : cfg.productionsOf[nt]) {
       const Production& prod = cfg.productions[p];
       std::set<std::uint32_t>& children = childrenOf[p];
@@ -156,7 +182,12 @@ std::vector<std::set<std::uint32_t>> record_shapes(Cfg& cfg, Packed& out) {
       if (may_be_lone(p, nonterminal(nt)) && --waits[cfg.productions[p].lhs] == 0)
         work.push_back(cfg.productions[p].lhs);
   }
-  if (done != nnts) throw Refused("a cycle of rules reads no input");
+  // A copy of an infix node writes what its node does.
+  for (std::uint32_t p = 0; p < nprods; ++p)
+    if (const std::uint32_t node = cfg.productions[p].copyOf; node != kNone) {
+      out.shapes[p] = out.shapes[node];
+      childrenOf[p] = childrenOf[node];
+    }
   // What the one record of a symbol becomes under the entry its production
   // gives it.
   for (const Production& prod : cfg.productions)
@@ -259,6 +290,9 @@ std::vector<std::uint32_t> election_order(const Cfg& cfg, const std::vector<bool
   for (const bool called : {true, false})
     for (std::uint32_t nt = 0; nt < nnts; ++nt)
       if (loop[nt] && !seen[nt] && outside[nt] == called) visit(nt);
+  // A copy of an infix node stands where its node does.
+  for (std::uint32_t p = 0; p < nprods; ++p)
+    if (const std::uint32_t node = cfg.productions[p].copyOf; node != kNone) order[p] = order[node];
   return order;
 }
 
@@ -366,7 +400,6 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
     const auto& gotos = automaton.states[from].gotos;
     auto& row = suffixes[from];
     while (unit[to] != kNone) {
-      if (taken.size() > nnts) throw Refused("a cycle of rules reads no input");
       const auto p = unit[to], nt = cfg.productions[p].lhs;
       const auto next = std::ranges::lower_bound(gotos, nt, {}, [](const auto& g) { return g.first; });
       to = next->second;
@@ -449,9 +482,14 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
     for (const auto mask : scopes) passed.push_back(trivia_of(cfg, mask));
   }
   Closers needs = closers(cfg, automaton);
-  out.closeMost = needs.most;
+  refuse_empty_cycles(cfg, needs.nullable);
+  out.cornerAt = std::move(needs.cornerAt);
+  out.corners = std::move(needs.corners);
   out.nullable = needs.nullable;
-  for (std::size_t s = 0; s < nstates; ++s) states[s].close = std::move(needs.rows[s]);
+  for (std::size_t s = 0; s < nstates; ++s) {
+    states[s].close = std::move(needs.rows[s]);
+    states[s].kernel = std::move(needs.kernels[s]);
+  }
   if (std::ranges::any_of(needs.turns, std::identity{})) {
     // Per item of a state's kernel, the symbols that stand after a dot once
     // it is closed: what is read next over the state. For a turn that goes
@@ -612,17 +650,22 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
       // shift first, then its reductions in the order of their productions.
       std::ranges::stable_sort(state.actions, {}, &PackedAction::terminal);
       // An implied token is left out only where the state has nothing else
-      // to do with the token that comes.
+      // to do with the token that comes: beside reductions whose tests may
+      // refuse it, it stays, and is taken where they do.
       const auto leaves_out = [&](const PackedAction& a) {
         return a.kind == PackedAction::Kind::reduce && cfg.productions[a.value].implied;
+      };
+      const auto refusable = [&](const PackedAction& a) {
+        return leaves_out(a) ||
+               (a.kind == PackedAction::Kind::reduce && cfg.productions[a.value].checks());
       };
       auto kept = state.actions.begin();
       for (auto first = kept; first != state.actions.end();) {
         auto next = first + 1;
         while (next != state.actions.end() && next->terminal == first->terminal) ++next;
-        const bool allImplied = std::all_of(first, next, leaves_out);
+        const bool stays = std::all_of(first, next, refusable);
         for (; first != next; ++first)
-          if (allImplied || !leaves_out(*first)) {
+          if (stays || !leaves_out(*first)) {
             if (kept != first) *kept = *first;
             ++kept;
           }
@@ -642,7 +685,7 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
           acted.set(action.terminal);
         }
       if (terminals.size() > 1) {
-        order.of(s, acted, terminals.size(), inserts);
+        order.of(s, acted, inserts);
         // Their numbers' order is the list read as the first of the
         // terminals; a list kept ends with those it leaves out, by number.
         if (!std::ranges::equal(inserts, std::span(terminals).first(inserts.size()))) {
@@ -778,6 +821,8 @@ void terminal_sets(const Cfg& cfg, const LexDfa& dfa, Packed& out) {
   Bits needed(nterms);
   for (const PackedState& state : out.states) needed.merge(state.close);
   Bits follow(nterms), mayClose(nterms);
+  std::map<std::vector<std::uint64_t>, std::uint16_t> kernelLists;
+  out.kernelAt.push_back(0);
   for (const PackedState& state : out.states) {
     follow.clear();
     mayClose.clear();
@@ -789,8 +834,19 @@ void terminal_sets(const Cfg& cfg, const LexDfa& dfa, Packed& out) {
         mayClose.set(action.terminal);
     }
     out.followOf.push_back(set_of(follow));
-    out.closeOf.push_back(set_of(state.close));
     out.mayCloseOf.push_back(set_of(mayClose));
+    const auto [list, fresh] =
+        kernelLists.try_emplace(state.kernel, static_cast<std::uint16_t>(kernelLists.size()));
+    if (fresh) {
+      out.kernels.insert(out.kernels.end(), state.kernel.begin(), state.kernel.end());
+      out.kernelAt.push_back(static_cast<std::uint32_t>(out.kernels.size()));
+    }
+    out.kernelOf.push_back(list->second);
+  }
+  if (!cfg.newlineIn.empty()) {
+    follow.clear();
+    for (const std::uint16_t t : cfg.newlineIn) follow.set(t);
+    out.newlineIn = set_of(follow);
   }
   Bits peers(nterms);
   for (std::size_t i = 1; i < dfa.acceptSets.size(); ++i) {
@@ -831,8 +887,9 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
       trivia.set(t);
     if (cfg.terminals[t].trivia != Trivia::none) passed.set(t);
   }
-  // Between brackets the end of a line is a blank: where no trivia reads a
-  // line ending, every state reads the line's terminal to pass it there.
+  // Where a bracket mutes line ends, the end of a line is a blank: where no
+  // trivia reads a line ending, every state reads the line's terminal to
+  // pass it there.
   bool lines = cfg.newline != 0;
   for (const unsigned char end : {'\n', '\r'})
     lines = lines && (dfa.nstates() < 2 ||

@@ -39,13 +39,24 @@ struct OpsOf<V, RR, TypeList<Ops...>> {
   static constexpr ImageOpDesc kAll[] = {kOp<V, Ops, RR>...};
 };
 
+// A level's operators write the operator member of the node it builds: its
+// own for a prefix or postfix level, the rule's for a binary one.
 template <class V, class RR, class L>
 consteval ImageStageLevelDesc stage_level() {
   using Alts = typename alts_list<typename L::op_expr>::type;
   ImageStageLevelDesc d;
   d.group = L::kGroup;
-  d.ops = OpsOf<V, RR, Alts>::kAll;
   d.count = static_cast<std::uint32_t>(tl_size<Alts>::value);
+  if constexpr (detail::is_unary_level<L>) {
+    d.ops = OpsOf<V, L, Alts>::kAll;
+    d.climbRow = kRowPtr<Row<WriteKind::climb, typename L::node_type>>;
+    d.operandRow = kRowPtr<owned_row<L::operand_pointer>>;
+    d.returns = dump_type_name<typename L::node_type>();
+    d.members[0] = detail::member_identifier<L::op_pointer>();
+    d.members[1] = detail::member_identifier<L::operand_pointer>();
+  } else {
+    d.ops = OpsOf<V, RR, Alts>::kAll;
+  }
   return d;
 }
 

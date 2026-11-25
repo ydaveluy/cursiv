@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <set>
 #include <span>
 #include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -279,6 +279,31 @@ std::uint32_t Explorer::made(std::uint32_t state, Token held, std::uint32_t prod
 
 namespace {
 
+// Explore each branch of a lexical fallback until it leaves the split or
+// returns to the same stack and token without advancing.
+template <class R, class Context>
+struct Forks {
+  struct Entry { R reading; Context context{}; bool leave = false; };
+  std::vector<Entry> open;
+  std::set<SplitSite> active;
+
+  bool enter(R r, std::uint32_t first) {
+    if (!active.insert(r.site(first)).second) return false;
+    r.resume = first;
+    open.push_back({r, {}, true});
+    return true;
+  }
+
+  bool pending() {
+    while (!open.empty() && open.back().leave) {
+      const auto& r = open.back().reading;
+      active.erase(r.site(r.resume));
+      open.pop_back();
+    }
+    return !open.empty();
+  }
+};
+
 // A reading ahead, with the split action it has not derived yet and the
 // token it shifted last.
 struct Ahead : Reading {
@@ -308,17 +333,51 @@ struct Cursor {
   bool operator==(const Cursor&) const = default;
 };
 
-// The grammar's order among the ways a node was made: the decisions of two
-// ways are compared as a reading from the top down meets them, and the first
-// that differs tells.
+// The order among the ways a node was made. Where they read different
+// tokens from one place, the lexer's choice at the first tells; else the decisions
+// of two ways are compared as a reading from the top down meets them, and the
+// first that differs tells.
 class Election {
  public:
-  Election(const Machine& text, Cactus& stacks) : t(text.t), stacks(stacks), stop(text.stop) {}
+  Election(const Machine& text, Cactus& stacks)
+      : t(text.t), text(text), stacks(stacks), stop(text.stop) {}
 
   void clear() {
     _need = kNoStack;
     _open.clear();
     _folds.clear();
+    _apart.clear();
+  }
+
+  // The lexer's choice between the readings on `a` and `b`: -1 for `a`, 1 for
+  // `b` at the first place their texts since they parted read different
+  // tokens; 0 where none tells.
+  int lexical(std::uint32_t a, std::uint32_t b) {
+    std::uint32_t x = a, y = b;
+    while (x != y) {
+      if (x > y) x = stacks.parent(x);
+      else y = stacks.parent(y);
+    }
+    const auto end = [&](std::uint32_t n) { return n >= stacks.base() ? stacks.end(n) : 0; };
+    const TextOffset last = apart(x, std::max(end(a), end(b)));
+    if (last == kNoPlace) return 0;
+    for (std::uint32_t n = a; n != x; n = stacks.parent(n)) _x.push_back(n);
+    for (std::uint32_t n = b; n != x; n = stacks.parent(n)) _y.push_back(n);
+    int lex = tokens(0, 0, last);
+    while (_need != kNoStack) {
+      elected(_need);
+      lex = tokens(0, 0, last);
+    }
+    _x.clear();
+    _y.clear();
+    return lex;
+  }
+
+  // Readings took different tokens from `place`: elections over text that
+  // holds it compare tokens first.
+  void readApart(TextOffset place) {
+    const auto at = std::ranges::lower_bound(_apart, place);
+    if (at == _apart.end() || *at != place) _apart.insert(at, place);
   }
 
   // The actions of the splits met by the reading that stands on `top`, as
@@ -347,6 +406,7 @@ class Election {
 
   // Compare the symbols reached over the same parent, in the state above them.
   bool before(std::uint32_t a, std::uint32_t b) {
+    if (const int lex = lexical(a, b); lex != 0) return lex < 0;
     auto over = stacks.state(a);
     while (stacks.parent(a) != stacks.parent(b)) {
       over = stacks.state(a);
@@ -369,19 +429,40 @@ class Election {
   std::uint32_t elected(std::uint32_t root) {
     const auto wait = [&](std::uint32_t node) {
       const auto best = stacks.ways(node);
-      _waiting.push_back({node, best, stacks.way(best).next, _remaining.size()});
+      _waiting.push_back({node, best, stacks.way(best).next, _remaining.size(), _x.size(), _y.size()});
     };
     _waiting.clear();
     wait(root);
     while (!_waiting.empty()) {
       throwIfCancelled(stop);
-      auto& [node, best, other, base] = _waiting.back();
+      auto& [node, best, other, base, x, y] = _waiting.back();
       if (other == kNoStack) {
         stacks.settle(node, best);
         _waiting.pop_back();
         continue;
       }
-      if (_remaining.size() == base) _remaining.push_back({cursor(node, other), cursor(node, best)});
+      if (_remaining.size() == base) {
+        if (const TextOffset last = apart(stacks.parent(node), stacks.end(node)); last != kNoPlace) {
+          // A walk left for the election of a node goes on where it stopped.
+          if (_x.size() == x && _y.size() == y) {
+            kids(_x, other);
+            kids(_y, best);
+          }
+          const int lex = tokens(x, y, last);
+          if (_need != kNoStack) {
+            wait(_need);
+            continue;
+          }
+          _x.resize(x);
+          _y.resize(y);
+          if (lex != 0) {
+            if (lex < 0) best = other;
+            other = stacks.way(other).next;
+            continue;
+          }
+        }
+        _remaining.push_back({cursor(node, other), cursor(node, best)});
+      }
       const int rank = order(base);
       if (_need != kNoStack) {
         wait(_need);
@@ -392,6 +473,81 @@ class Election {
     }
     _need = kNoStack;
     return stacks.ways(root);
+  }
+
+  // The last place readings took different tokens from within the text read
+  // over `parent` up to `end`; kNoPlace for none.
+  [[nodiscard]] TextOffset apart(std::uint32_t parent, TextOffset end) const {
+    const TextOffset begin = parent >= stacks.base() && parent != kNoStack ? stacks.end(parent) : 0;
+    const auto past = std::ranges::lower_bound(_apart, end);
+    return past == _apart.begin() || past[-1] < begin ? kNoPlace : past[-1];
+  }
+  // Push the nodes a way was reduced over, the first read on top.
+  void kids(std::vector<std::uint32_t>& side, std::uint32_t way) {
+    const Derivation& made = stacks.way(way);
+    if (made.production != kNoProduction)
+      std::ranges::copy(stacks.kids(made, t.productionSize[made.production]),
+                        std::back_inserter(side));
+  }
+  // Whether a node is a frame or a shifted token.
+  [[nodiscard]] bool leaf(std::uint32_t node) const {
+    return node < stacks.base() || stacks.way(stacks.ways(node)).production == kNoProduction;
+  }
+  // The token a leaf shifted; none for a frame or a token of no text.
+  [[nodiscard]] Token shifted(std::uint32_t node) const {
+    if (node < stacks.base()) return {};
+    const auto [state, end, held, heldEnd] = stacks.key(node);
+    const Token token{text.src + heldEnd, held};
+    return token.end == text.src + token.begin(text) ? Token{} : token;
+  }
+  // The lexer's choice at the first place the nodes of `_x` and `_y` above
+  // `x` and `y` read different tokens: -1 for `_x`, 1 for `_y`, 0 where they
+  // read the same up to `last`, tie, or part at tokens that begin apart. A
+  // node made several ways is asked for, left on top.
+  int tokens(std::size_t x, std::size_t y, TextOffset last) {
+    _need = kNoStack;
+    for (;;) {
+      throwIfCancelled(stop);
+      if (_x.size() == x || _y.size() == y) return 0;
+      const std::uint32_t a = _x.back(), b = _y.back();
+      if (a == b) {
+        _x.pop_back();
+        _y.pop_back();
+        continue;
+      }
+      const bool leafA = leaf(a), leafB = leaf(b);
+      const Token u = leafA ? shifted(a) : Token{}, v = leafB ? shifted(b) : Token{};
+      if (leafA && u.end == nullptr) {
+        _x.pop_back();
+        continue;
+      }
+      if (leafB && v.end == nullptr) {
+        _y.pop_back();
+        continue;
+      }
+      if (leafA && leafB) {
+        // Tokens that begin apart, or past the last place read apart, are no
+        // choice of the lexer.
+        if (u.begin(text) != v.begin(text) || u.begin(text) > last) return 0;
+        if (u.end != v.end) return u.end > v.end ? -1 : 1;
+        const auto rankU = text.rank(u), rankV = text.rank(v);
+        if (rankU != rankV) return rankU < rankV ? -1 : 1;
+        _x.pop_back();
+        _y.pop_back();
+        continue;
+      }
+      // Open the node that holds more text, else the one made later: it may hold the other.
+      const bool openA =
+          !leafA && (leafB || stacks.end(a) > stacks.end(b) || (stacks.end(a) == stacks.end(b) && a > b));
+      auto& side = openA ? _x : _y;
+      const std::uint32_t way = stacks.ways(side.back());
+      if (stacks.way(way).next != kNoStack) {
+        _need = side.back();
+        return 0;
+      }
+      side.pop_back();
+      kids(side, way);
+    }
   }
 
   // The elected way of `node`, from its outermost production. A node with
@@ -554,13 +710,20 @@ class Election {
   }
 
   const Tables& t;
+  const Machine& text;
   Cactus& stacks;
   const CancellationToken& stop;
-  // The node an order waits for, the nodes being elected, and the nodes
-  // whose actions a plan still lists, each with whether its children are
-  // listed.
+  // The places readings took different tokens from, ascending, and the
+  // nodes of the two derivations whose tokens are compared.
+  static constexpr TextOffset kNoPlace = ~TextOffset{0};
+  std::vector<TextOffset> _apart;
+  std::vector<std::uint32_t> _x, _y;
+  // The node an order waits for; the nodes being elected, each with its
+  // comparisons above `base` in `_remaining` and its token walk above `x` and
+  // `y`; and the nodes whose actions a plan still lists, each with whether its
+  // children are listed.
   std::uint32_t _need = kNoStack;
-  struct Ballot { std::uint32_t node, best, other; std::size_t base; };
+  struct Ballot { std::uint32_t node, best, other; std::size_t base, x, y; };
   std::vector<Ballot> _waiting;
   std::vector<std::pair<std::uint32_t, bool>> _open;
   // Later siblings or outer turns, in reverse reading order.
@@ -570,23 +733,6 @@ class Election {
   std::vector<std::pair<std::uint32_t, std::uint32_t>> _folds;
   std::vector<std::pair<std::uint32_t, std::size_t>> _counted;
 };
-
-// Of two tokens read at one place, the longer, then the one of the lower
-// rank.
-bool beats(const Machine& text, Token u, Token v) {
-  return u.end > v.end ||
-         (u.end == v.end && u.terminal() != v.terminal() && text.rank(u) < text.rank(v));
-}
-
-// Restrict a split to ordinary actions or to the lexical fallback they ruled out.
-bool eligible(Machine& text, Cactus& stacks, const Reading& r, std::uint32_t& begin,
-              std::uint32_t& end, std::uint32_t retries) {
-  const auto boundary = end - retries;
-  const bool taken = takes(text, stacks, r, begin, boundary - begin);
-  if (taken) end = boundary;
-  else begin = boundary;
-  return taken;
-}
 
 // Where a reading of a round stands: a hash of its node's key and its
 // indentation, its node, and its place in the round.
@@ -607,39 +753,40 @@ struct Machine::Lookahead {
   Explorer::Closure closure;
   std::vector<Ahead> live, next;
   Forks<Ahead, std::uint32_t> forks;
-  // Per place a token was shifted from in a round, the token the lexer
-  // prefers; the ways down of a step; the readings of a round that may
-  // stand alike.
-  std::vector<Token> leaders;
+  // The ways down of a step; the readings of a round that may stand alike;
+  // the first token taken from each place a reading may still read from.
   Routes routes;
   std::vector<Alike> alike;
+  std::vector<Token> took;
   // The readings that fell in each of the last real token positions; the
-  // nodes they stood on still to walk, and those walked.
+  // nodes they stood on still to walk, and per node the last walk that met it.
   std::array<std::vector<Ahead::Trace>, kValidateShifts> falls;
   std::vector<std::uint32_t> fellPlan;
   std::vector<std::uint32_t> stood;
-  std::unordered_set<std::uint32_t> walked;
+  std::vector<std::uint32_t> walked;
+  std::uint32_t walk = 0;
 };
 
-void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token tok,
-                      Indented indented, std::uint32_t first, std::uint32_t count,
-                      std::uint32_t rereads, std::vector<std::uint32_t>& plan) {
+void resolve(Machine& text, std::span<const Frame> stack, std::span<const std::uint32_t> above,
+             const char* at, Token tok, Indented indented, std::uint32_t first,
+             std::uint32_t count, std::uint32_t rereads, std::vector<std::uint32_t>& plan) {
   const Tables& t = text.t;
   if (text.lookahead == nullptr) text.lookahead = new Machine::Lookahead(text);
-  auto& [stacks, election, closure, live, next, forks, leaders, routes, alike, falls, fellPlan,
-         stood, walked] = *text.lookahead;
-  stacks.clear(stack);
-  const auto top = static_cast<std::uint32_t>(stack.size()) - 1;
+  auto& [stacks, election, closure, live, next, forks, routes, alike, took, falls, fellPlan, stood,
+         walked, walk] = *text.lookahead;
+  stacks.clear(stack, above);
+  const std::uint32_t top = stacks.base() - 1;
   if (rereads) {
-    auto end = first + count;
-    const bool taken = eligible(text, stacks, {top, 0, at, tok, indented}, first, end, rereads);
-    count = end - first;
-    if (taken && count == 1) {
+    const Followed arms = followed(text, stacks, {top, 0, at, tok, indented}, first, count, rereads);
+    first = arms.begin;
+    count = arms.end - arms.begin;
+    if (!arms.fallback && count == 1) {
       plan.assign(1, first);
       return;
     }
   }
   live.clear();
+  took.clear();
   forks.open.clear();
   forks.active.clear();
   election.clear();
@@ -669,9 +816,8 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
       if (!r.done && (back == nullptr || r.at < back)) back = r.at;
     if (!closure.seen.empty()) closure.seen.clear();
     next.clear();
-    Token firstToken{nullptr, 0};
-    bool different = false;
     bool fell = false;
+    std::erase_if(took, [&](Token u) { return text.src + u.begin(text) < back; });
     for (const Ahead& from : live) {
       if (from.done || from.at != back) {
         next.push_back(from);
@@ -696,12 +842,12 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
           open.back().reading.path = kNoStack;
         }
         Ahead r{x.reading(), x.arm, x.taken, x.invented, start.path};
-        std::uint32_t begin = x.arms, end = begin + x.armCount;
-        const bool fallback = exit == Exit::split && x.rereads &&
-                              !eligible(text, stacks, x, begin, end, x.rereads);
-        if (fallback && !forks.enter(r, x.arms)) exit = Exit::joined;
+        const Followed arms = exit == Exit::split
+                                  ? followed(text, stacks, x, x.arms, x.armCount, x.rereads)
+                                  : Followed{};
+        if (arms.fallback && !forks.enter(r, x.arms)) exit = Exit::joined;
         // A forced reread owns only the forced prefix up to the next decision.
-        if (count == 1 && (exit == Exit::joined || !fallback || end - begin != 1)) {
+        if (count == 1 && (exit == Exit::joined || !arms.fallback || arms.end - arms.begin != 1)) {
           if (exit != Exit::joined) plan_of(r.trace(), plan);
           return;
         }
@@ -716,7 +862,7 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
         } else if (exit == Exit::split) {
           // A split met on the way: a reading goes on from each action.
           if (stacks.revision()) r.path = kNoStack;
-          for (std::uint32_t arm = end; arm-- > begin;) {
+          for (std::uint32_t arm = arms.end; arm-- > arms.begin;) {
             Ahead& branch = open.emplace_back(r, kNoStack).reading;
             branch.resume = arm;
             branch.arm = stacks.choose(arm, r.path, r.arm);
@@ -725,11 +871,15 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
         } else if (exit != Exit::joined) {
           r.done = exit == Exit::accepted;
           r.stepped = !r.done && r.taken.end != text.src + r.taken.begin(text);
-          next.push_back(r);
+          // Tokens taken apart from one place are the lexer's to choose between.
           if (r.stepped) {
-            if (firstToken.end == nullptr) firstToken = r.taken;
-            different |= r.taken.head != firstToken.head || r.taken.end != firstToken.end;
+            const auto place = std::ranges::find_if(
+                took, [&](Token u) { return u.begin(text) == r.taken.begin(text); });
+            if (place == took.end()) took.push_back(r.taken);
+            else if (place->head != r.taken.head || place->end != r.taken.end)
+              election.readApart(r.taken.begin(text));
           }
+          next.push_back(r);
         }
         if (!forks.pending()) break;
         fork = open.back();
@@ -737,25 +887,6 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
       }
     }
     live.swap(next);
-    // Only readings that shifted competing tokens need lexical election.
-    if (different) {
-      leaders.clear();
-      for (const Ahead& r : live) {
-        if (!r.stepped) continue;
-        if (leaders.empty() || leaders.back().begin(text) != r.taken.begin(text))
-          leaders.push_back(r.taken);
-        else if (beats(text, r.taken, leaders.back()))
-          leaders.back() = r.taken;
-      }
-      std::ranges::sort(leaders, [&](Token a, Token b) {
-        return a.begin(text) != b.begin(text) ? a.begin(text) < b.begin(text) : beats(text, a, b);
-      });
-      std::erase_if(live, [&](const Ahead& r) {
-        if (!r.stepped) return false;
-        const auto best = std::ranges::lower_bound(leaders, r.taken.begin(text), {}, [&](Token token) { return token.begin(text); });
-        return beats(text, *best, r.taken);
-      });
-    }
     // Readings can share a continuation only after a shift to the same
     // state. Most rounds have no candidate pair.
     std::uint64_t seen = 0;
@@ -777,11 +908,11 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
         const Ahead& r = live[i];
         if (!r.done)
           alike.push_back({stacks.hash(r.node) ^ (std::uint64_t{r.indented.level} << 40) ^
-                               r.indented.depth, r.node, i});
+                               r.indented.bracket, r.node, i});
       }
       const auto key = [&](const Alike& a) {
         const Indented& in = live[a.index].indented;
-        return std::tuple_cat(stacks.key(a.node), std::tuple(in.level, in.depth));
+        return std::tuple_cat(stacks.key(a.node), std::tuple(in.level, in.bracket));
       };
       if (!std::ranges::is_sorted(alike)) std::ranges::sort(alike);
       std::uint32_t head = kNoStack;
@@ -832,7 +963,14 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
       const auto shared = [&] {
         plan.erase(std::ranges::mismatch(plan, fellPlan).in1, plan.end());
       };
-      walked.clear();
+      if (++walk == 0) {
+        std::ranges::fill(walked, 0);
+        walk = 1;
+      }
+      walked.resize(stacks.size());
+      const auto met = [&](std::uint32_t node) {
+        return std::exchange(walked[node - stacks.base()], walk) == walk;
+      };
       for (std::size_t i = 1; i <= falls.size(); ++i)
         for (const Ahead::Trace& fallen : falls[(round + i) % falls.size()]) {
           if (plan.empty()) break;
@@ -843,7 +981,7 @@ void resolve(Machine& text, std::span<const Frame> stack, const char* at, Token 
           while (!stood.empty() && !plan.empty()) {
             std::uint32_t node = stood.back();
             stood.pop_back();
-            for (; node != kNoStack && node >= stacks.base() && walked.insert(node).second;
+            for (; node != kNoStack && node >= stacks.base() && !met(node);
                  node = stacks.parent(node))
               stacks.others(node, [&](std::uint32_t other) {
                 fellPlan.clear();
@@ -872,7 +1010,7 @@ struct Machine::Conditions {
   struct Hash {
     std::size_t operator()(const Place& p) const {
       return join_hash(static_cast<std::uint32_t>(p.at >> 32), p.indented.level,
-                       static_cast<TextOffset>(p.at), p.token ^ (std::uint64_t{p.indented.depth} << 48),
+                       static_cast<TextOffset>(p.at), p.token ^ (std::uint64_t{p.indented.bracket} << 48),
                        p.from);
     }
   };
@@ -964,12 +1102,13 @@ bool Machine::reads(std::uint32_t state, const char* from, Token tok, Indented i
   };
   std::vector<Asked> asked;
   // The condition's first token is the token that comes, as its states read
-  // that text; read otherwise, the token itself, which they may refuse.
+  // that text; read otherwise, or written by a repair, the token itself, which
+  // they may refuse.
   const auto ask = [&](std::uint32_t root, const char* p, Token next, Indented level) {
     const auto s = stacks.state(root);
     const auto before = endReads;
     Token first = next;
-    if (const auto mode = t.stateMode[s]; mode != kNoToken) {
+    if (const auto mode = t.stateMode[s]; mode != kNoToken && (next.head & kReplaced) == 0) {
       const Token read = observed(t.modes[mode].read(*this, src + next.begin(*this), mode));
       if (read.begin(*this) != next.begin(*this) || read.end == next.end) first = read;
     }
@@ -1004,9 +1143,9 @@ bool Machine::reads(std::uint32_t state, const char* from, Token tok, Indented i
         Explorer x(*this, stacks, r);
         const Exit exit = x.step();
         observed(exit == Exit::shifted ? x.taken : x.tok);
-        auto first = x.arms, end = first + x.armCount;
-        if (exit == Exit::split && x.rereads && kept.wanted == nullptr)
-          eligible(*this, stacks, x, first, end, x.rereads);
+        Followed arms{};
+        if (exit == Exit::split && kept.wanted == nullptr)
+          arms = followed(*this, stacks, x, x.arms, x.armCount, x.rereads);
         if (kept.wanted != nullptr) {
           a.open.push_back(o);
           ask(kept.wantedRoot, std::exchange(kept.wanted, nullptr), kept.wantedToken,
@@ -1019,7 +1158,7 @@ bool Machine::reads(std::uint32_t state, const char* from, Token tok, Indented i
         } else {
           r = x.reading();
           if (exit == Exit::shifted) a.open.push_back({r, link, o.tokens + 1});
-          for (auto arm = end; arm-- > first;) {
+          for (auto arm = arms.end; arm-- > arms.begin;) {
             r.resume = arm;
             a.open.push_back({r, kNoStack, o.tokens});
           }
@@ -1055,7 +1194,7 @@ Prediction predict_prefix(Machine& m, std::span<const PrefixArm> arms, const Pre
   // Only the arms of tied terminals tell a token several terminals read.
   if (m.tok.hasGroup() && arms.front().terminal == kNoToken) return {};
   std::uint32_t chosen = kNoStack;
-  Token best{nullptr, 0};
+  Token token{nullptr, 0};
   bool sole = !path;
   for (std::size_t i = 0; i < arms.size(); ++i) {
     const Token next = m.t.modes[arms[i].mode].read(m, at, arms[i].mode);
@@ -1066,18 +1205,13 @@ Prediction predict_prefix(Machine& m, std::span<const PrefixArm> arms, const Pre
       continue;
     }
     if (arms[i].terminal != kNoToken && !m.takes_tied(m.tok, arms[i].terminal)) continue;
-    if (shifts == 1 || next.end <= m.src + next.begin(m) ||
-        (best.end && next.begin(m) != best.begin(m))) return {};
-    sole &= !best.end;
-    if (!best.end || next.end > best.end) {
-      best = next;
-      chosen = static_cast<std::uint32_t>(i);
-    } else if (next.end == best.end) {
-      chosen = kNoStack;
-    }
+    // Each arm reads its own token: two that shift leave the text to tell.
+    if (shifts == 1 || next.end <= m.src + next.begin(m) || token.end) return {};
+    token = next;
+    chosen = static_cast<std::uint32_t>(i);
   }
   if (chosen == kNoStack) return {};
-  return {m.arms + chosen, sole ? static_cast<TextOffset>(best.end - m.src) : 0};
+  return {m.arms + chosen, sole ? static_cast<TextOffset>(token.end - m.src) : 0};
 }
 
 Prediction predict_cell(Machine& m, const PrefixTable& table) {
@@ -1116,7 +1250,7 @@ std::uint32_t arm(Machine& m, Prediction* prediction) {
       *prediction = m.t.predict(m);
       if (prediction->arm != kNoStack) return prediction->arm;
     }
-    resolve(m, {m.frames, m.top}, m.at, m.tok, m.indented, m.arms, m.armCount, m.rereads, m.plan);
+    resolve(m, {m.frames, m.top}, {}, m.at, m.tok, m.indented, m.arms, m.armCount, m.rereads, m.plan);
     if (m.plan.empty()) return kNoStack;
   }
   return m.plan[m.planned++];
@@ -1124,56 +1258,49 @@ std::uint32_t arm(Machine& m, Prediction* prediction) {
 
 bool takes(Machine& text, Cactus& stacks, const Reading& from,
            std::uint32_t first, std::uint32_t count, std::uint16_t terminal, Token* shifted) {
-  struct Open {
-    Reading reading;
-    std::uint32_t arm, end, pin = kNoStack;
-  };
+  // A query walks under the route each reading pins.
   struct Query {
     Token token;
     std::uint16_t terminal;
-    std::vector<Open> open;
-    std::set<SplitSite> seen{};
-    Token best{};
+    Walk<std::uint32_t> walk{};
+    Token found{};
     bool matched = false;
   };
+  // A query that waits for whether the ordinary actions of `split` take its token.
   struct Pending {
     Query parent;
     Explorer split;
     std::map<SplitSite, std::optional<bool>>::iterator answer;
   };
-  Query q{from.tok, terminal, {{from, first, first + count}}};
+  Query q{from.tok, terminal};
+  q.walk.branch(from, {first, first + count, false}, kNoStack);
   std::vector<Pending> pending;
   std::map<SplitSite, std::optional<bool>> answers;
   Routes routes;
-  const auto eligible = [&](const Explorer& split, bool taken) {
-    const auto boundary = split.arms + split.armCount - split.rereads;
-    q.open.push_back({split.reading(), taken ? split.arms : boundary,
-                     taken ? boundary : split.arms + split.armCount});
+  const auto branch = [&](const Explorer& x, bool taken) {
+    q.walk.branch(x, followed(x.arms, x.armCount, x.rereads, taken), kNoStack);
   };
   for (;;) {
-    if (q.open.empty() || (q.matched && q.terminal == kNoToken)) {
+    if (q.walk.open.empty() || (q.matched && q.terminal == kNoToken)) {
       const bool taken = q.matched;
       if (pending.empty()) {
-        if (taken && shifted) *shifted = q.best;
+        if (taken && shifted) *shifted = q.found;
         return taken;
       }
       auto& parent = pending.back();
       parent.answer->second = taken;
       q = std::move(parent.parent);
-      eligible(parent.split, taken);
+      branch(parent.split, taken);
       pending.pop_back();
       continue;
     }
-    const Open step = q.open.back();
-    if (++q.open.back().arm == step.end) q.open.pop_back();
+    const auto step = q.walk.open.back();
+    q.walk.open.pop_back();
     throwIfCancelled(text.stop);
-    Reading r = step.reading;
-    r.resume = step.arm;
-    routes.replay(step.pin);
-    Explorer x(text, stacks, r, {.routes = &routes, .keepShift = false});
+    routes.replay(step.context);
+    Explorer x(text, stacks, step.reading, {.routes = &routes, .keepShift = false});
     const Exit exit = x.step();
-    for (const auto pin : routes.forks)
-      q.open.push_back({r, step.arm, step.arm + 1, pin});
+    for (const auto pin : routes.forks) q.walk.open.push_back({step.reading, pin});
     const auto same = [&](Token tok) {
       return tok.end == q.token.end && tok.begin(text) == q.token.begin(text) &&
              ((tok.head ^ q.token.head) & (kReplaced | kMixedIndent)) == 0 &&
@@ -1181,41 +1308,34 @@ bool takes(Machine& text, Cactus& stacks, const Reading& from,
               ((tok.head & kTold) && !(q.token.head & kTold) && text.rank(tok) == text.rank(q.token)));
     };
     if (exit == Exit::accepted && q.terminal == kNoToken) q.matched = true;
+    // Each reading shifts the token it reads itself; of `terminal`, the longest.
     if (exit == Exit::shifted && x.taken.begin(text) == q.token.begin(text)) {
       if (q.terminal == kNoToken) {
         q.matched = same(x.taken);
-      } else {
-        if (!q.best.end || beats(text, x.taken, q.best)) {
-          q.best = x.taken;
-          q.matched = false;
-        }
-        if (!beats(text, q.best, x.taken) && x.taken.terminal() == q.terminal) {
-          q.best = x.taken;
-          q.matched = true;
-        }
+      } else if (x.taken.terminal() == q.terminal && (!q.found.end || x.taken.end > q.found.end)) {
+        q.found = x.taken;
+        q.matched = true;
       }
     }
-    if (exit != Exit::split) continue;
-    const auto site = x.site(x.arms);
-    if (!q.seen.insert(site).second) continue;
-    if (!x.rereads) {
-      q.open.push_back({x.reading(), x.arms, x.arms + x.armCount});
-    } else if (q.terminal == kNoToken && same(x.tok)) {
-      // Re-lexing excludes the held token. Only ordinary actions can establish this answer.
-      eligible(x, true);
-    } else {
-      const auto [answer, fresh] = answers.try_emplace(site, std::nullopt);
-      if (fresh) {
-        pending.push_back({std::move(q), x, answer});
-        q = {x.tok, kNoToken, {{x.reading(), x.arms, x.arms + x.armCount - x.rereads}}};
-      } else if (answer->second) {
-        eligible(x, *answer->second);
-      }
+    if (exit != Exit::split || !q.walk.first(x)) continue;
+    // Re-lexing excludes the held token: only ordinary actions can establish
+    // this answer. Otherwise a query of its own tells whether they take it.
+    if (!x.rereads || (q.terminal == kNoToken && same(x.tok))) {
+      branch(x, true);
+      continue;
+    }
+    const auto [answer, fresh] = answers.try_emplace(x.site(x.arms), std::nullopt);
+    if (fresh) {
+      pending.push_back({std::move(q), x, answer});
+      q = {x.tok, kNoToken};
+      branch(x, true);
+    } else if (answer->second) {
+      branch(x, *answer->second);
     }
   }
 }
 
-Exit run(Machine& m, bool* retry) {
+Exit run(Machine& m, bool* retry, FunctionRef<bool()> stops) {
   struct Choice { std::uint32_t arm; bool continuation, confirmed = false; };
   struct Site {
     std::size_t choice, keep, end;
@@ -1231,7 +1351,7 @@ Exit run(Machine& m, bool* retry) {
   std::vector<Frame> frames;
   NodeCount records = 0;
   Exit exit = m.t.drive(m);
-  while (exit == Exit::split) [[unlikely]] {
+  while (exit == Exit::split && !stops()) [[unlikely]] {
     Prediction prediction;
     const bool advanced = sites.empty() || m.tape.records() != records;
     const auto next = arm(m, retry && advanced ? &prediction : nullptr);
@@ -1300,7 +1420,7 @@ Exit run(Machine& m, bool* retry) {
       continue;
     }
     plan.clear();
-    resolve(m, stack, m.src + s.at, s.token, s.indent, s.first, s.count, s.rereads, plan);
+    resolve(m, stack, {}, m.src + s.at, s.token, s.indent, s.first, s.count, s.rereads, plan);
     next = s.choice;
     if (plan.empty() || plan.size() > choices.size() - next ||
         !std::equal(plan.begin(), plan.end(), choices.begin() + next,

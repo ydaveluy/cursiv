@@ -188,9 +188,19 @@ void a_dropped_level_closes_in_the_graph() {
   if (r.diagnostics.size() == 2) CHECK(r.diagnostics[1].begin >= fault);
 }
 
+// A condition on `indent` tests the indent the parse makes: a directive that
+// takes no suite leaves the deeper lines after it unread.
+void a_condition_tests_the_indent_the_parse_makes() {
+  const auto engine = tindent::synthetic::generated::Cases::createParser();
+  CHECK(engine->parse("bare dir a\nb\n").diagnostics.empty());
+  CHECK(!engine->parse("bare dir a\n  b\n").diagnostics.empty());
+  CHECK(engine->parse("bare a\n  b\n").diagnostics.empty());
+}
+
 }  // namespace
 
 int main() {
+  a_condition_tests_the_indent_the_parse_makes();
   an_indent_keeps_an_earlier_repair_reading_alive();
   an_indent_resolves_a_cell();
   a_refused_dedent_at_the_end_leaves_the_implied_token();

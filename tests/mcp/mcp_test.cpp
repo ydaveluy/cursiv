@@ -7,14 +7,15 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
@@ -353,6 +354,9 @@ void batches_are_refused() {
   CHECK(reply->object().get("error").object().get("code").integer() == -32600);
 }
 
+// Under WASI each thread has its own file descriptors: the answers, written by
+// the server's worker thread, cannot reach a file this thread opened.
+#ifndef __wasi__
 void stdio_cancels_a_request_and_drains_the_remaining_answers() {
   auto server = make();
   server.registerTool(
@@ -366,17 +370,32 @@ void stdio_cancels_a_request_and_drains_the_remaining_answers() {
         CHECK(token.stop_requested());
         return cursiv::McpToolResult{};
       });
-  std::istringstream input(
+  const std::filesystem::path dir =
+      std::filesystem::path(CURSIV_TEST_SCRATCH_DIR) / "cursiv_mcp_stdio";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "in.jsonl", std::ios::binary) << (
       R"({"jsonrpc":"2.0","id":"one","method":"tools/call","params":{"name":"wait","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
 {"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"one"}}
 {"jsonrpc":"2.0","id":2147483648,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
 )");
-  std::ostringstream output;
+  std::FILE* const input =
+      std::fopen((dir / "in.jsonl").string().c_str(), "rb");
+  std::FILE* const output =
+      std::fopen((dir / "out.jsonl").string().c_str(), "w+b");
+  CHECK(input != nullptr && output != nullptr);
   CHECK(server.serveStdio(input, output));
-  const auto reply = json::parse(output.str());
+  std::rewind(output);
+  std::string written;
+  for (int c; (c = std::getc(output)) != EOF;)
+    written.push_back(static_cast<char>(c));
+  std::fclose(input);
+  std::fclose(output);
+  const auto reply = json::parse(written);
   CHECK(reply.object().get("id").number() == 2147483648.);
   CHECK(reply.object().get("result").object().get("tools").array().size() == 1);
 }
+#endif
 
 void a_resource_is_listed_and_read() {
   cursiv::McpServer server = make();
@@ -457,7 +476,9 @@ void run() {
   a_notification_answers_nothing();
   malformed_json_is_a_parse_error();
   batches_are_refused();
+#ifndef __wasi__
   stdio_cancels_a_request_and_drains_the_remaining_answers();
+#endif
   a_resource_is_listed_and_read();
   a_name_is_registered_once();
 }

@@ -107,16 +107,22 @@ void scanners(const cursiv::Parser& parser) {
   next.clear();
   parser.nextFeaturesAt(prefix.cst(), alternate.find(' '), alternate.size(), next);
   CHECK(std::ranges::any_of(next, [](const auto& f) { return f.property == "items"; }));
+  // The parse that reads `a` is offered it in place of `a`; the one that
+  // reads `ab` is offered it in place of `ab` where its condition holds.
   for (const std::string_view choice : {"scan:choose:: ab!", "scan:comma::, ab!", "scan:comma::, ab?"}) {
     const auto document = parser.parse(choice);
     CHECK(document.accepted && document.diagnostics.empty());
     const auto at = choice.rfind("ab");
-    next.clear();
-    parser.nextFeaturesAt(document.cst(), at, at + 1, next);
-    CHECK(std::ranges::any_of(next, [&](const auto& f) {
-      const auto words = parser.getGrammar().terminalSpellings(f.feature);
-      return std::ranges::find(words, "a") != words.end();
-    }) == choice.ends_with('!'));
+    const auto offers = [&](std::size_t resume, std::string_view word) {
+      next.clear();
+      parser.nextFeaturesAt(document.cst(), at, resume, next);
+      return std::ranges::any_of(next, [&](const auto& f) {
+        const auto words = parser.getGrammar().terminalSpellings(f.feature);
+        return std::ranges::find(words, word) != words.end();
+      });
+    };
+    CHECK(offers(at + 1, "a"));
+    CHECK(offers(at + 2, "ab") == choice.ends_with('?'));
   }
   check(parser, "scan:rank:tag:", {"tag"});
   for (const auto prefix : {"scan:pair:tag", "scan:reverse:tag"})
@@ -257,7 +263,9 @@ void exercise(const cursiv::Parser& parser) {
         "shadow:##|==:==##!", "redefined:#=@=@!", "helper:##|(==:==)|##!",
         "recursive:##|(==:==)|##!", "recursive:##|(==:==)/(=:=)|##!",
         "inline:##|(==:==)|==!", "nested:##|(=:(==::==):=)|##!",
-        "probe:<==:==>", R"(raw:#"text"#)", R"(raw:##"a\##"b"##)",
+        "probe:<==:==>", "echo:aa", "echo:\xE9\xE9", "echo:\xE2\xE2",
+        "line:ab\nab", "line:\xE9\n\xE9", "line:\xC3\n\xC3",
+        R"(raw:#"text"#)", R"(raw:##"a\##"b"##)",
         R"(raw:##"a\##(#"inner"#)b"##)",
         R"(raw:#"a\#(##"inner\##"quote"##)b"#)"})
     check(parser, source, true);
@@ -267,6 +275,8 @@ void exercise(const cursiv::Parser& parser) {
         "local:##|==:=:##!", "shadow:##|==:=##!", "redefined:#=@=#!",
         "helper:##|(==:==)|==!", "recursive:##|(==:==)|==!",
         "inline:##|(==:==)|##!", "nested:##|(=:(==::=):=)|##!", "probe:<==:=>",
+        "echo:ab", "echo:\xE9" "a", "echo:\xE9", "echo:\xE2",
+        "line:\xE9\nx", "line:\xE9",
         R"(raw:##"a\##"b"#)"})
     check(parser, source, false);
   const std::string plain = "raw:##\"" + std::string(100000, 'x') + "\"##";
@@ -323,6 +333,11 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, "nullable:", "[");
   check(parser, "nullable:", "[]");
   check(parser, "nullable:", "[x]", false);
+  check(parser, "inside:", "[xaab");
+  check(parser, "inside:", "[xa");
+  check(parser, "inside:", "[aab");
+  check(parser, "inside:", "[xaa", false);
+  check(parser, "inside:", "[xaac", false);
   for (auto prefix : {"heredoc:", "explicit:"}) {
     check(parser, prefix, "<<<TAG\nTAG");
     check(parser, prefix, "<<<TAG\nbody\n  TAG");

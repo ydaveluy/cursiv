@@ -14,12 +14,20 @@ namespace tbranch {
 
 namespace ast {
 enum class Size { none, small, large };
+// A name, or two links joined.
+struct Link : cursiv::Extends<cursiv::AstNode> {
+  Link* left = nullptr;
+  string_view op;
+  Link* right = nullptr;
+  string_view name;
+};
 struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   boolean flag = false;
   string_view other;
   Size size = Size::none;
   int32 count = 0;
+  Link* link = nullptr;
 };
 struct Items : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
@@ -110,6 +118,13 @@ struct Suite : cursiv::GrammarSpec {
   struct SizeItem : rule<create<ast::Item>(
                         assign<&ast::Item::name>(ref<ID>) + lit<":"> +
                         assign<&ast::Item::size>(ref<Size>) + lit<";">)> {};
+  // A left recursion of one record, handed to the item past a test that its
+  // first token answers.
+  struct LinkName : rule<create<ast::Link>(assign<&ast::Link::name>(ref<ID>))> {};
+  struct Chain : infix<LinkName, ast::Link, left(lit<".">)> {};
+  struct LinkItem
+      : rule<create<ast::Item>(kw<"do"> + !lit<";"> + assign<&ast::Item::link>(ref<Chain>) +
+                               lit<"!">)> {};
   struct Root
       : rule<create<ast::Items>(
             (lit<"doc:"> + many(append<&ast::Items::items>(ref<DocumentedItem>))) |
@@ -124,7 +139,8 @@ struct Suite : cursiv::GrammarSpec {
             (lit<"gatedinline:"> +
              many(append<&ast::Items::items>(ref<GatedInlineItem>))) |
             (lit<"count:"> +
-             many(append<&ast::Items::items>(ref<CountItem>))))> {};
+             many(append<&ast::Items::items>(ref<CountItem>))) |
+            (lit<"link:"> + many(append<&ast::Items::items>(ref<LinkItem>))))> {};
   using entry = Root;
   using ignored = WS;
 };

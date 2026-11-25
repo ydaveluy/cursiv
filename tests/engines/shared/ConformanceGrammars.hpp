@@ -86,6 +86,11 @@ struct Clause : cursiv::Extends<cursiv::AstNode> {
 struct Query : cursiv::Extends<cursiv::AstNode> {
   vector<Clause*> clauses;
 };
+struct Level : cursiv::Extends<cursiv::AstNode> {
+  First* first = nullptr;
+  Second* second = nullptr;
+  Level* next = nullptr;
+};
 }  // namespace ast
 
 struct Keyword : cursiv::GrammarSpec {
@@ -616,6 +621,36 @@ struct UpToTwo : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Two parses read `ab` apart: one as `a` then `b`, the other as one token.
+struct TwoTokens : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct X : rule<create<ast::First>(lit<"x">)> {};
+  struct Y : rule<create<ast::Second>(lit<"x">)> {};
+  struct Root : rule<(ref<X> + lit<"q"> + lit<"a"> + lit<"b">) | (ref<Y> + lit<"q"> + lit<"ab">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+struct TwoTokensSwapped : TwoTokens {
+  struct Root : rule<(ref<Y> + lit<"q"> + lit<"ab">) | (ref<X> + lit<"q"> + lit<"a"> + lit<"b">)> {};
+  using entry = Root;
+};
+
+// Two parses read `if` apart: the first written as a name, the other as the keyword.
+struct KeywordOrName : TwoTokens {
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Root : rule<(ref<Y> + lit<"q"> + ref<ID>) | (ref<X> + lit<"q"> + kw<"if">)> {};
+  using entry = Root;
+};
+
+// Two parses read a line end apart: the first written skips it, the other
+// reads it as a token.
+struct LineEnd : TwoTokens {
+  struct NL : terminal<eol> {};
+  struct Root : rule<(ref<X> + lit<"q"> + lit<"a">) | (ref<Y> + lit<"q"> + ref<NL> + lit<"a">)> {};
+  using entry = Root;
+};
+
 struct AtEnd : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<lit<"a"> + &eof> {};
@@ -859,6 +894,34 @@ struct AmbiguousList : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Each level reads its block by either of two rules that read the same text,
+// then goes on alike.
+struct Levels : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct First : rule<create<ast::First>(lit<"{"> + lit<"}">)> {};
+  struct Second : rule<create<ast::Second>(lit<"{"> + lit<"}">)> {};
+  struct Root
+      : rule<create<ast::Level>(
+            kw<"r"> + ((assign<&ast::Level::first>(ref<First>) +
+                        assign<&ast::Level::next>(ref<Root>)) |
+                       (assign<&ast::Level::second>(ref<Second>) +
+                        assign<&ast::Level::next>(ref<Root>)) |
+                       kw<"e">))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Each suffix of a chain is the operand's or the loop's, to the end of the
+// text.
+struct Chain : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Basic : rule<ref<ID> | (ref<Basic> + lit<"."> + ref<ID>)> {};
+  struct Root : rule<create<ast::Doc>(ref<Basic> + many(lit<"."> + ref<ID>))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // A name is a run of characters that is no number and no capitalised word:
 // the condition before it reads on without bound.
 struct UnboundedName : cursiv::GrammarSpec {
@@ -877,6 +940,110 @@ struct FaultEdges : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<create<ast::First>(kw<"i8"> | kw<"i16"> | kw<"i32"> | kw<"i64">) |
                     create<ast::Second>(kw<"include">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// A rule whose test names a keyword and leads to a state that only reduces: a
+// misspelt keyword is read there as the keyword it stands for.
+struct NamedAhead : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct NUM : terminal<some(d)> {};
+  struct Qualifier : rule<(ref<ID> + &kw<"then">) | ref<NUM>> {};
+  struct Root : rule<create<ast::Doc>(ref<Qualifier> + kw<"then"> + ref<ID>)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// A rule whose test names a literal and leads to a state that only reduces: a
+// literal left out there is put back where the test reads it.
+struct InsertedAhead : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Head : rule<ref<ID> + &lit<".">> {};
+  struct Root : rule<create<ast::Doc>(ref<Head> + lit<"."> + ref<ID> + lit<";">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Statements end at a semicolon, a line end, a closing brace or the end of
+// the text, and a block in braces holds more of them. `go` ends a statement
+// alone where no name follows it on its line.
+struct Braced : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  static constexpr auto semi = implied(lit<";">, gap::line | &lit<"}"> | eof);
+  struct Statement;
+  struct Block : rule<lit<"{"> + many(ref<Statement>) + lit<"}">> {};
+  struct Statement
+      : rule<ref<Block> | (ref<ID> + semi) | (kw<"go"> + option(!gap::line + ref<ID>) + semi)> {};
+  struct Root : rule<create<ast::Doc>(many(ref<Statement>))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// Fields in braces, each led by any number of tags: a field that has read no
+// tag yet has not begun.
+// A second name is a postfix operator only where a `)` closes it: a test that
+// reads past the token in hand.
+struct Postfixed : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Expr : rule<ref<ID> + option(ref<ID> + &(lit<")"> + !lit<"x">))> {};
+  struct Root : rule<create<ast::Doc>(lit<"("> + ref<Expr> + lit<")"> + lit<";">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// A comment left open reads, where the lexer falls back, as a `/` and a `*`
+// that an expression after an invented name could take. Each keyword waits
+// for its own mark: readings in many modes reach the comment.
+struct Divided : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct Term : rule<ref<ID> | (lit<"*"> + ref<Term>)> {};
+  struct Expr : rule<ref<Term> + many(lit<"/"> + ref<Term>)> {};
+  struct Item : rule<(ref<Expr> + lit<";">) |
+                     (kw<"ka"> + lit<"%a">) |
+                     (kw<"kb"> + lit<"%b">) |
+                     (kw<"kc"> + lit<"%c">) |
+                     (kw<"kd"> + lit<"%d">) |
+                     (kw<"ke"> + lit<"%e">) |
+                     (kw<"kf"> + lit<"%f">) |
+                     (kw<"kg"> + lit<"%g">) |
+                     (kw<"kh"> + lit<"%h">) |
+                     (kw<"ki"> + lit<"%i">) |
+                     (kw<"kj"> + lit<"%j">) |
+                     (kw<"kk"> + lit<"%k">) |
+                     (kw<"kl"> + lit<"%l">) |
+                     (kw<"km"> + lit<"%m">) |
+                     (kw<"kn"> + lit<"%n">) |
+                     (kw<"ko"> + lit<"%o">) |
+                     (kw<"kp"> + lit<"%p">) |
+                     (kw<"kq"> + lit<"%q">) |
+                     (kw<"kr"> + lit<"%r">) |
+                     (kw<"ks"> + lit<"%s">) |
+                     (kw<"kt"> + lit<"%t">)> {};
+  struct Root : rule<create<ast::Doc>(lit<"{"> + many(ref<Item>) + lit<"}">)> {};
+  using entry = Root;
+  using ignored = WS;
+  using hidden = COMMENT;
+};
+
+// Fields open with a list of tags that reads nothing before their first word,
+// and sixteen kinds give a repair many fields it could invent.
+struct Slots : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct ID : terminal<some(cr<"a-z">)> {};
+  struct STRING : terminal<lit<"\""> + many(cr<"a-z0-9">) + lit<"\"">> {};
+  struct Kind : rule<kw<"ka"> | kw<"kb"> | kw<"kc"> | kw<"kd"> | kw<"ke"> | kw<"kf"> | kw<"kg"> | kw<"kh"> |
+                     kw<"ki"> | kw<"kj"> | kw<"kk"> | kw<"kl"> | kw<"km"> | kw<"kn"> | kw<"ko"> | kw<"kp">> {};
+  struct Field : rule<many(lit<"@"> + ref<ID>) + kw<"o"> + ref<Kind> + ref<Kind> + ref<Kind> +
+                      ref<Kind> + ref<ID> + option(kw<"default"> + lit<"="> + ref<STRING>) +
+                      option(kw<"optional">)> {};
+  struct Root : rule<create<ast::Doc>(lit<"{"> + many(ref<Field>) + lit<"}">)> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -925,6 +1092,10 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"callerlonger:"> + ref<CallerLonger::Root>) |
              (lit<"callermany:"> + ref<CallerMany::Root>) |
              (lit<"uptotwo:"> + ref<UpToTwo::Root>) |
+             (lit<"twotokens:"> + ref<TwoTokens::Root>) |
+             (lit<"twotokensswapped:"> + ref<TwoTokensSwapped::Root>) |
+             (lit<"keywordorname:"> + ref<KeywordOrName::Root>) |
+             (lit<"lineend:"> + ref<LineEnd::Root>) |
              (lit<"atendhost:"> + ref<Hosted<AtEnd>::Root>) |
              (lit<"wordhost:"> + ref<Adopting<Word>::Root>) |
              (lit<"calls:"> + ref<Calls::Root>) |
@@ -940,8 +1111,17 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"sharedhead:"> + ref<SharedHead::Root>) |
              (lit<"sharedtags:"> + ref<SharedTags::Root>) |
              (lit<"faultedges:"> + ref<FaultEdges::Root>) |
+             (lit<"namedahead:"> + ref<NamedAhead::Root>) |
+             (lit<"insertedahead:"> + ref<InsertedAhead::Root>) |
+             (lit<"braced:"> + ref<Braced::Root>) |
+             (lit<"slots:"> + ref<Slots::Root>) |
+             (lit<"postfixed:"> + ref<Postfixed::Root>) |
+             (lit<"divided:"> + skip(ignore<Divided::WS>, hide<Divided::COMMENT>,
+                                     ref<Divided::Root> + eof)) |
              (lit<"convergedarms:"> + ref<ConvergedArms::Root>) |
              (lit<"ambiguouslist:"> + ref<AmbiguousList::Root>) |
+             (lit<"levels:"> + ref<Levels::Root>) |
+             (lit<"chain:"> + ref<Chain::Root>) |
              (lit<"unboundedname:"> + ref<UnboundedName::Root>) |
              (lit<"keywordtrivia:"> + skip(ignore<KeywordTrivia::WS>,
                                            hide<KeywordTrivia::NOTE>,

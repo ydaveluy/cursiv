@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <functional>
 #include <span>
 #include <string>
@@ -105,16 +104,15 @@ LinkingError DefaultLinker::createLinkingError(
     using enum LinkingFailure;
     switch (why) {
       case Cycle:
-        return std::format("Cyclic reference resolution detected for '{}'.",
-                           reference.referenceText);
+        return "Cyclic reference resolution detected for '" +
+               std::string(reference.referenceText) + "'.";
       case Threw:
         if (reference.failure.empty())
-          return std::format(
-              "An error occurred while resolving reference to '{}'.",
-              reference.referenceText);
-        return std::format(
-            "An error occurred while resolving reference to '{}': {}",
-            reference.referenceText, reference.failure);
+          return "An error occurred while resolving reference to '" +
+                 std::string(reference.referenceText) + "'.";
+        return "An error occurred while resolving reference to '" +
+               std::string(reference.referenceText) +
+               "': " + std::string(reference.failure);
       case NotFound:
         break;
     }

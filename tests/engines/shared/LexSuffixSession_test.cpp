@@ -450,7 +450,7 @@ void lexical_probes_charge_their_actions_and_keep_all_fallbacks() {
   Repairer writer(m, true);
   writer.split(token(0, m.end, 1), 2, 4, 3);
   CHECK(m.rereads == 3);
-  resolve(m, {m.frames, m.top}, m.at, m.tok, m.indented, m.arms, m.armCount, m.rereads, m.plan);
+  resolve(m, {m.frames, m.top}, {}, m.at, m.tok, m.indented, m.arms, m.armCount, m.rereads, m.plan);
   CHECK(m.explored == 4 && m.plan.size() == 1 && m.plan.front() == 2);
 }
 
@@ -483,12 +483,15 @@ void prefix_predictions_require_a_unique_shift() {
   many.split(token(0, many.end, 1), 7, 3);
   lexer.modes[1].read = [](Machine& m, const char*, std::uint32_t) { return token(0, m.src + 1, 1); };
   lexer.modes[2].read = [](Machine& m, const char*, std::uint32_t) { return token(0, m.end, 1); };
-  PrefixArm rivals[]{{1, shifts}, {1, shifts}, {2, shifts}};
-  CHECK(predict_prefix(many, rivals).arm == 9);
-  std::swap(rivals[0], rivals[2]);
-  CHECK(predict_prefix(many, rivals).arm == 7);
-  rivals[1].mode = 2;
+  // Arms that each shift the token they read leave the text to tell, the
+  // longer token as the shorter.
+  PrefixArm rivals[]{{1, shifts}, {1, absent}, {2, shifts}};
   CHECK(predict_prefix(many, rivals).arm == kNoStack);
+  rivals[0].shifts = absent;
+  CHECK(predict_prefix(many, rivals).arm == 9);
+  rivals[0].shifts = shifts;
+  rivals[2].shifts = absent;
+  CHECK(predict_prefix(many, rivals).arm == 7);
 }
 
 void a_typed_reread_returns_the_longest_eligible_shift() {
@@ -690,7 +693,7 @@ void long_token_and_trivia_scans_read_the_stop() {
   CancellationTokenSource stop;
   Reading reading(lexer.tables, text, stop.get_token());
   auto& m = reading.machine;
-  CHECK(m.line_between(m.src, m.end) && m.gap_reads(0, m.src, m.end, true));
+  CHECK(m.line_between(m.src, m.end, m.indented) && m.gap_reads(0, m.src, m.end, true));
   const std::string word(kWatchedBytes + 2, 'a');
   Reading tokenReading(lexer.tables, word, stop.get_token());
   auto& tokenMachine = tokenReading.machine;
@@ -704,7 +707,7 @@ void long_token_and_trivia_scans_read_the_stop() {
       CHECK(false);
     } catch (const OperationCancelled&) {}
   };
-  cancelled([&] { (void)m.line_between(m.src, m.end); });
+  cancelled([&] { (void)m.line_between(m.src, m.end, m.indented); });
   cancelled([&] { (void)m.gap_reads(0, m.src, m.end, true); });
   cancelled([&] { (void)m.indentation(m.src, m.indented); });
   cancelled([&] { (void)tokenMachine.ending(token(0, tokenMachine.end, 1)); });

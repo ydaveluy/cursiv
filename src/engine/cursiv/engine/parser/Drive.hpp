@@ -101,7 +101,7 @@ struct Drive {
     Token tok{tokenEnd, tokenHead};
     bool indented = false;
     if constexpr (L::indents) {
-      if (m.indented.depth == 0 && m.lexing().line_start(p)) [[unlikely]] {
+      if (m.indented.bracket == 0 && m.lexing().line_start(p)) [[unlikely]] {
         const Token made = m.lexing().indentation(p, m.indented);
         indented = made.end != nullptr;
         if (indented) tok = made;
@@ -110,6 +110,10 @@ struct Drive {
     if (!indented)
       tok = lexed(m, p, Mode == kNoStack ? m.lexing().t.stateMode[m.under()]
                                           : static_cast<std::uint16_t>(Mode));
+    if constexpr (L::linesIn) {
+      if (!indented && !m.indented.muted() && m.lexing().src + tok.begin(m.lexing()) != p)
+        tok = m.lexing().line_in_trivia(p, tok, m.under(), m.indented);
+    }
     if constexpr (sizeof...(Cells) != 0) {
       CURSIV_MUSTTAIL return among<M, Base, Cells...>(m, p, 0, tok.end, tok.head);
     } else {
@@ -172,10 +176,9 @@ struct Drive {
     }
     if constexpr (Nest == Nesting::indent) m.lexing().indent(m.indented, tok);
     if constexpr (Nest == Nesting::dedent) m.lexing().dedent(m.indented);
-    if constexpr (Nest == Nesting::open) ++m.indented.depth;
-    if constexpr (Nest == Nesting::close) {
-      if (m.indented.depth != 0) --m.indented.depth;
-    }
+    if constexpr (Nest == Nesting::open || Nest == Nesting::block)
+      m.lexing().open_bracket(m.indented, Nest == Nesting::open);
+    if constexpr (Nest == Nesting::close) m.lexing().close_bracket(m.indented);
     if constexpr (M::kSteps)
       return m.shifted();
     else
@@ -210,13 +213,13 @@ struct Drive {
     return m.split({tokenEnd, tokenHead}, L::cells[at].value, element(at), extra(at));
   }
 
-  // Between brackets, the end of a line written in the text is a blank: the
-  // state reads the next token.
+  // Where a bracket mutes line ends, the end of a line written in the text is
+  // a blank: the state reads the next token.
   template <class M>
   CURSIV_PRESERVE_NONE static Exit newline(M& m, const char* p, NodeCount at,
                                            const char* tokenEnd, std::uint64_t tokenHead) {
     const Token tok{tokenEnd, tokenHead};
-    if (m.indented.depth != 0 && tok.end != m.lexing().src + tok.begin(m.lexing())) [[unlikely]] {
+    if (m.indented.muted() && tok.end != m.lexing().src + tok.begin(m.lexing())) [[unlikely]] {
       CURSIV_MUSTTAIL return L::template steps<M>[L::enters[m.under()]](m, tok.end, at, tokenEnd,
                                                                         tokenHead);
     }
@@ -371,15 +374,18 @@ struct Drive {
     CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
   }
 
+  // What the entry of a lone record becomes under the fuse of row `row`: the
+  // row holds it one column past `inner`, `kNoElement` wrapping to the first.
+  CURSIV_ALWAYS_INLINE static auto fused(std::uint32_t row) {
+    return [row](std::uint32_t inner) {
+      return L::fuseMap[row + static_cast<std::uint16_t>(inner + 1)];
+    };
+  }
+
   // The records reduction `r` gives an entry to, each among its first `K`.
   template <class M, std::size_t... K>
   CURSIV_ALWAYS_INLINE static void takes(M& m, const Reduction& r, std::index_sequence<K...>) {
-    ((K < r.taken ? m.take(r.takes[K].at, r.size,
-                           [row = r.takes[K].row](std::uint32_t inner) {
-                             return L::fuseMap[row + inner];
-                           })
-                  : void()),
-     ...);
+    ((K < r.taken ? m.take(r.takes[K].at, r.size, fused(r.takes[K].row)) : void()), ...);
   }
 
   // A production reduced as `reductions` tells it for the step of cell `at`,
@@ -394,8 +400,12 @@ struct Drive {
     // Written for reduction `R`, the step knows it where it is written.
     const Reduction& r =
         R != nullptr ? *R : L::reductions[Held ? L::cells[at].step : L::enters[m.under()]];
-    if constexpr (nothing && std::is_same_v<M, Explorer>)
-      if (m.options.closure && m.visited(r.production, p, tok)) return Exit::joined;
+    // A reading joins one that took the same reduction from the same node,
+    // place and token: at any reduction where readings walk routes, else at an
+    // empty one.
+    if constexpr (std::is_same_v<M, Explorer>)
+      if (m.options.closure && (nothing || m.options.routes) && m.visited(r.production, p, tok))
+        return Exit::joined;
     if constexpr (!std::is_null_pointer_v<decltype(Holds)>)
       if (!Holds(m, p, tok)) CURSIV_MUSTTAIL return again<M>(m, p, at, tokenEnd, tokenHead);
     if (!m.roomy(nothing, (Shapes & (kRecordEmpty | kRecordSeveral)) != 0)) [[unlikely]]
@@ -420,18 +430,9 @@ struct Drive {
       fuse = static_cast<std::uint32_t>(read >> 32);
     }
     if (static_cast<ElementId>(record) != kNoElement) {
-      // The machine's always empty record stands behind the trivia read.
-      if constexpr (!M::kSteps && Shapes == kRecordEmpty) {
-        if (!m.flushed()) [[unlikely]] {
-          m.settle();
-          m.make_room();
-        }
-      }
       const char* const where = nothing && Held ? m.lexing().src + tok.begin(m.lexing()) : p;
       if constexpr ((Shapes & kRecordLone) != 0)
-        open = m.template close<Shapes>(
-            open, static_cast<ElementId>(record), where,
-            [fuse](std::uint32_t inner) { return L::fuseMap[fuse + inner]; });
+        open = m.template close<Shapes>(open, static_cast<ElementId>(record), where, fused(fuse));
       else
         open = m.template close<Shapes>(open, static_cast<ElementId>(record), where);
     }

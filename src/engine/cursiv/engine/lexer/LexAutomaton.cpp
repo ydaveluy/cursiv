@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,14 @@ constexpr std::uint32_t kStopped = ~std::uint32_t{0};
 
 // The copies of a counted repetition an automaton unrolls.
 constexpr std::uint64_t kUnrolled = 64;
+
+// One character, as `any` reads it.
+constexpr ImageNode kAnyChar = [] {
+  ImageNode any;
+  any.kind = ImageKind::cpset;
+  any.flags = kCpNot;
+  return any;
+}();
 
 // More states than any automaton the lexer can hold is made of: a terminal
 // that inlines itself many times over stops here.
@@ -159,10 +168,7 @@ std::uint32_t LexAutomatonBuilder::monitor(ImageId body, std::uint8_t how) {
   reads._depth = _depth + 1;
   // Read wherever a character begins, it lets any characters pass before it.
   if (how == kAnywhere) {
-    ImageNode any;
-    any.kind = ImageKind::cpset;
-    any.flags = kCpNot;
-    const Frag f = reads.char_class(any);
+    const Frag f = reads.char_class(kAnyChar);
     reads.eps(0, f.in);
     reads.eps(f.out, 0);
   }
@@ -433,6 +439,7 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
   // Per node, as reading a terminal a node calls may grow the image: its
   // literal paths and its other ones, kNoImage for none.
   std::unordered_map<ImageId, std::pair<ImageId, ImageId>> sides;
+  std::unordered_set<ImageId> begun;
   const auto tests = [&](ImageId id) {
     const ImageKind kind = _image.nodes[bare(id)].kind;
     return kind == ImageKind::notOf || kind == ImageKind::andOf;
@@ -459,7 +466,12 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
     const ImageNode n = _image.nodes[at];
     const std::uint32_t read = n.kind == ImageKind::seq ? reader(n) : n.count;
     if (!ready) {
-      // Its parts first.
+      // Its parts first; met again among them, it is read whole.
+      if (!begun.insert(at).second) {
+        sides.emplace(at, std::pair{kNoImage, at});
+        open.pop_back();
+        continue;
+      }
       open.back().second = true;
       if (n.kind == ImageKind::choice)
         for (std::uint32_t i = 0; i < n.count; ++i) open.emplace_back(_image.children[n.first + i], false);
@@ -517,36 +529,31 @@ void LexAutomatonBuilder::add(std::uint16_t term, const Terminal& terminal) {
   const std::size_t accepts = _accepts.size();
   const std::size_t entries = _states[0].eps.size();
   _unboundedTest = false;
-  const auto arms = branches(body);
-  for (const auto& [id, literal] : arms) {
-    _literal = literal;
-    if (add_body(term, id, true)) continue;
-    _states.resize(states);
-    _accepts.resize(accepts);
-    _states[0].eps.resize(entries);
-    try {
+  try {
+    const auto arms = branches(body);
+    for (const auto& [id, literal] : arms) {
+      _literal = literal;
+      if (add_body(term, id, true)) continue;
+      _states.resize(states);
+      _accepts.resize(accepts);
+      _states[0].eps.resize(entries);
       for (const auto& [branch, ranked] : arms) {
         _literal = ranked;
         if (!add_lead(branch, LexTest::match)) throw NotRegular{_why};
       }
       _literal = false;
       programs(terminal.name);
-    } catch (const NotRegular& refused) {
-      throw Refused(terminal.name + " cannot be read (" + refused.why + ")");
+      return;
     }
-    return;
-  }
-  const auto root = _image.nodes[bare(body)];
-  const bool openRun = root.kind == ImageKind::repeat && root.n == kUnboundedCount &&
-                       (_image.nodes[_image.children[root.first]].kind == ImageKind::seq ||
-                        _image.nodes[_image.children[root.first]].kind == ImageKind::choice);
-  if ((openRun || _unboundedTest) &&
-      std::ranges::none_of(arms, [](const auto& arm) { return arm.second; })) {
-    try {
+    const auto root = _image.nodes[bare(body)];
+    const bool openRun = root.kind == ImageKind::repeat && root.n == kUnboundedCount &&
+                         (_image.nodes[_image.children[root.first]].kind == ImageKind::seq ||
+                          _image.nodes[_image.children[root.first]].kind == ImageKind::choice);
+    if ((openRun || _unboundedTest) &&
+        std::ranges::none_of(arms, [](const auto& arm) { return arm.second; }))
       consider(states, accepts, entries, terminal.trivia == Trivia::ignored);
-    } catch (const NotRegular& refused) {
-      throw Refused(refused.why);
-    }
+  } catch (const NotRegular& refused) {
+    throw Refused(terminal.name + " cannot be read (" + refused.why + ")");
   }
 }
 
@@ -1314,10 +1321,14 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::copies(
 void LexAutomatonBuilder::closers(ImageId close, std::vector<Closer>& out,
                                   bool& eof) const {
   std::vector<std::pair<ImageId, bool>> todo{{close, true}};
+  // A node met again, as through a terminal that names itself, adds nothing.
+  std::set<std::pair<ImageId, bool>> seen;
   while (!todo.empty()) {
     const auto [id, consumed] = todo.back();
     todo.pop_back();
-    const ImageNode& n = _image.nodes[id];
+    const ImageId at = bare(id);
+    if (!seen.emplace(at, consumed).second) continue;
+    const ImageNode& n = _image.nodes[at];
     switch (n.kind) {
       case ImageKind::lit:
         // The text is read a character at a time: only a closer made of
@@ -1358,31 +1369,6 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::through(
   }
   if (literal && ends.empty() && !eof) throw NotRegular{"a run with no closer"};
   const bool plain = !eof && std::ranges::all_of(ends, &Closer::consumed);
-  // A closer that is not read, or the end of input, says where the token
-  // ends: nothing can follow it in the same token. Elsewhere, and where the
-  // closers are not literals, the run is `open + many(!close + any) + close`.
-  if (!literal || (!plain && (_matching || !tail))) {
-    const Frag open = co_await compile(_image.children[n.first], false);
-    const ImageId close = _image.children[n.first + 1];
-    const std::uint32_t loop = state();
-    eps(open.out, loop);
-    const Frag other = co_await condition(close, true);
-    eps(loop, other.in);
-    // One character, as `any` reads it.
-    ImageNode any;
-    any.kind = ImageKind::cpset;
-    any.flags = kCpNot;
-    const Frag one = char_class(any);
-    eps(other.out, one.in);
-    eps(one.out, loop);
-    const Frag closed = co_await compile(close, tail);
-    eps(loop, closed.in);
-    co_return Frag{open.in, closed.out};
-  }
-  // A closer that is not read is given back by its length.
-  for (const Closer& end : ends)
-    if (!end.consumed && end.bytes.size() > 0xFF) throw NotRegular{"a closer too long to test"};
-
   // The closers' trie; node 0 is the empty text.
   struct Node {
     std::array<std::int32_t, 256> child;
@@ -1391,26 +1377,29 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::through(
     Node() { child.fill(-1); }
   };
   std::vector<Node> trie(1);
-  for (const Closer& end : ends) {
-    std::uint32_t at = 0;
-    for (const char ch : end.bytes) {
-      const auto b = static_cast<unsigned char>(ch);
-      if (trie[at].child[b] < 0) {
-        trie[at].child[b] = static_cast<std::int32_t>(trie.size());
-        trie.emplace_back();
-      }
-      at = static_cast<std::uint32_t>(trie[at].child[b]);
-    }
-    if (end.consumed || trie[at].back < 0)
-      trie[at].back = end.consumed ? 0 : static_cast<int>(end.bytes.size());
-  }
-  for (Node& node : trie) node.state = state();
-  const std::uint32_t out = state();
   // Where each byte leads from each node: its child, or where the longest
   // shorter end of the text leads. Nodes are visited by depth, so that end's
   // row is already whole.
-  std::vector<std::array<std::uint32_t, 256>> go(trie.size());
-  {
+  std::vector<std::array<std::uint32_t, 256>> go;
+  // Whether the trie reads the closers. It gives back a closer that is not
+  // read by its length, at most 255 bytes, and cannot tell which closes where
+  // one ends inside another that is still being read.
+  const auto trie_reads = [&] {
+    for (const Closer& end : ends) {
+      if (!end.consumed && end.bytes.size() > 0xFF) return false;
+      std::uint32_t at = 0;
+      for (const char ch : end.bytes) {
+        const auto b = static_cast<unsigned char>(ch);
+        if (trie[at].child[b] < 0) {
+          trie[at].child[b] = static_cast<std::int32_t>(trie.size());
+          trie.emplace_back();
+        }
+        at = static_cast<std::uint32_t>(trie[at].child[b]);
+      }
+      if (end.consumed || trie[at].back < 0)
+        trie[at].back = end.consumed ? 0 : static_cast<int>(end.bytes.size());
+    }
+    go.resize(trie.size());
     std::vector<std::uint32_t> fail(trie.size(), 0), order{0};
     // Per node, whether a closer ends its text without beginning it.
     std::vector<bool> closesWithin(trie.size(), false);
@@ -1422,9 +1411,7 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::through(
           go[u][b] = u == 0 ? 0 : go[fail[u]][b];
           continue;
         }
-        // A closer standing strictly inside another one starts later and
-        // ends first: which one closes then depends on text past the shorter.
-        if (closesWithin[u]) throw NotRegular{"closers one inside the other"};
+        if (closesWithin[u]) return false;
         const auto v = static_cast<std::uint32_t>(child);
         fail[v] = u == 0 ? 0 : go[fail[u]][b];
         closesWithin[v] = trie[fail[v]].back >= 0 || closesWithin[fail[v]];
@@ -1432,7 +1419,27 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::through(
         order.push_back(v);
       }
     }
+    return true;
+  };
+  // A closer that is not read, or the end of input, says where the token
+  // ends: nothing can follow it in the same token. Elsewhere, and where the
+  // trie cannot read the closers, the run is `open + many(!close + any) + close`.
+  if (!literal || (!plain && (_matching || !tail)) || !trie_reads()) {
+    const Frag open = co_await compile(_image.children[n.first], false);
+    const ImageId close = _image.children[n.first + 1];
+    const std::uint32_t loop = state();
+    eps(open.out, loop);
+    const Frag other = co_await condition(close, true);
+    eps(loop, other.in);
+    const Frag one = char_class(kAnyChar);
+    eps(other.out, one.in);
+    eps(one.out, loop);
+    const Frag closed = co_await compile(close, tail);
+    eps(loop, closed.in);
+    co_return Frag{open.in, closed.out};
   }
+  for (Node& node : trie) node.state = state();
+  const std::uint32_t out = state();
   for (std::size_t u = 0; u < trie.size(); ++u) {
     const Node& node = trie[u];
     if (node.back == 0) eps(node.state, out);
@@ -1720,11 +1727,11 @@ LexDfa LexAutomatonBuilder::automaton(std::vector<std::uint32_t>& starts) const 
     if (set.empty()) return 0;
     const auto [it, fresh] = ids.try_emplace(set, static_cast<std::uint32_t>(sets.size()));
     if (!fresh) return it->second;
-    // A token whose last lead is not settled yet ends there only where the
-    // input does.
+    // Where the last lead is not settled yet, a token ends only with the
+    // input; a matcher candidate ends where the matcher reads it to.
     std::vector<LexAccept> accepts;
     const auto ends = [&](LexAccept accept, std::uint8_t pending) {
-      if (pending != kSettled) {
+      if (pending != kSettled && accept.guard != LexTest::match) {
         if (accept.guard == LexTest::word) return;
         accept.guard = LexTest::eof;
       }

@@ -417,6 +417,58 @@ struct Base : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// A rule of one level that groups nothing: behind its operand comes only the
+// operator it refuses.
+struct Alone : Base {
+  struct Operand : rule<create<ast::Atom>(assign<&ast::Atom::name>(ref<ID>))> {};
+  struct E : infix<Operand, ast::Binary, nonassoc(lit<"<~">)> {};
+  struct Root
+      : rule<create<ast::Document>(assign<&ast::Document::value>(ref<E>)) +
+             eof> {};
+  using entry = Root;
+};
+
+// An operator that begins with what may read nothing.
+struct Led : Base {
+  struct Operand : rule<create<ast::Atom>(assign<&ast::Atom::name>(ref<ID>))> {};
+  struct E : infix<Operand, ast::Binary, left(many(lit<"!~">) + lit<"-~">)> {};
+  struct Root
+      : rule<create<ast::Document>(assign<&ast::Document::value>(ref<E>)) +
+             eof> {};
+  using entry = Root;
+};
+
+// An operator spelled as a keyword that another rule reads behind the
+// expression.
+struct Twin : Base {
+  struct OVER : terminal<lit<"%~">> {};
+  struct Operand : rule<create<ast::Atom>(assign<&ast::Atom::name>(ref<ID>))> {};
+  struct E : infix<Operand, ast::Binary, nonassoc(ref<OVER>)> {};
+  struct Root
+      : rule<create<ast::Document>(
+                 (lit<"@~"> + assign<&ast::Document::value>(ref<E>) +
+                  lit<"%~"> + lit<"@~">) |
+                 assign<&ast::Document::value>(ref<E>)) +
+             eof> {};
+  using entry = Root;
+};
+
+// The same with an operator the matcher reads.
+struct Matched : Base {
+  struct OVER
+      : terminal<!(lit<"Q"> + many(d) + !cr<"A-Z">) + some(cr<"A-Z">)> {};
+  struct WORD : terminal<some(cr<"A-Z">)> {};
+  struct Operand : rule<create<ast::Atom>(assign<&ast::Atom::name>(ref<ID>))> {};
+  struct E : infix<Operand, ast::Binary, nonassoc(ref<OVER>)> {};
+  struct Root
+      : rule<create<ast::Document>(
+                 (lit<"@~"> + assign<&ast::Document::value>(ref<E>) +
+                  ref<WORD> + lit<"@~">) |
+                 assign<&ast::Document::value>(ref<E>)) +
+             eof> {};
+  using entry = Root;
+};
+
 }  // namespace tnonassoc
 
 namespace telectionloop {
@@ -545,6 +597,10 @@ struct Suite : tinfixop::Base {
   struct Root : rule<ref<tinfixop::Suite::Root> |
                      (lit<"shared:"> + ref<tinfixop::Shared::Root>) |
                      (lit<"nonassoc:"> + ref<tnonassoc::Base::Root>) |
+                     (lit<"alone:"> + ref<tnonassoc::Alone::Root>) |
+                     (lit<"led:"> + ref<tnonassoc::Led::Root>) |
+                     (lit<"twin:"> + ref<tnonassoc::Twin::Root>) |
+                     (lit<"matched:"> + ref<tnonassoc::Matched::Root>) |
                      (lit<"election:"> + ref<telectionloop::Suite::Root>)> {};
   using entry = Root;
 };

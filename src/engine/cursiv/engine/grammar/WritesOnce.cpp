@@ -90,12 +90,19 @@ class Check {
           for (const void* row : {stage.leftRow, stage.rightRow})
             if (const auto m = member(row); m != none && !operands.insert(m)) refuse(m, "twice");
           wrote.merge(operands);
-          for (std::uint32_t l = 0; l < stage.levelCount; ++l)
+          for (std::uint32_t l = 0; l < stage.levelCount; ++l) {
+            // A prefix or postfix level builds its own node: its operand
+            // member, then its operator's.
+            const Association group = stage.levels[l].group;
+            const bool unary = group == Association::Prefix || group == Association::Postfix;
+            const unsigned operand = member(stage.levels[l].operandRow);
+            if (operand != none) wrote.insert(operand);
             for (std::uint32_t o = 0; o < stage.levels[l].count; ++o)
               if (const auto m = member(stage.levels[l].ops[o].row); m != none) {
-                if (operands.contains(m)) refuse(m, "twice");
+                if (unary ? m == operand : operands.contains(m)) refuse(m, "twice");
                 wrote.insert(m);
               }
+          }
           break;
         }
         default:

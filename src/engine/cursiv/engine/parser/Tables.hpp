@@ -79,8 +79,9 @@ constexpr std::uint8_t lexical_rank(Trivia trivia, bool literal) {
   return (trivia != Trivia::none ? 2 : 0) + !literal;
 }
 
-// The change a shifted terminal makes to indentation.
-enum class Nesting : std::uint8_t { none, indent, dedent, open, close };
+// The change a shifted terminal makes to indentation: a bracket that opens
+// mutes line ends, unless it is a block.
+enum class Nesting : std::uint8_t { none, indent, dedent, open, block, close };
 
 // What the text before a shifted token may read as: whatever the lexer
 // passed, nothing, or the trivia of the mode the gap names.
@@ -368,6 +369,31 @@ enum : unsigned {
   kTakes = 64
 };
 
+// An item of a state's kernel as the fewest tokens that complete a stack read
+// it: the nonterminal it completes (`kAccept` for a start), the nonterminal
+// after its dot (`kNone` for a terminal or none), the symbols before the dot,
+// the tokens it still reads and those past that nonterminal; `kNever` where no
+// tokens complete it.
+struct KernelCost {
+  static constexpr std::uint16_t kAccept = 0xFFFF;
+  static constexpr std::uint16_t kNone = 0xFFFF;
+  static constexpr std::uint16_t kNever = 0xFFF;
+  std::uint16_t lhs;
+  std::uint16_t symbol;
+  std::uint8_t dot;
+  std::uint16_t rest;
+  std::uint16_t after;
+  [[nodiscard]] static constexpr KernelCost of(std::uint64_t v) {
+    return {static_cast<std::uint16_t>(v), static_cast<std::uint16_t>(v >> 16),
+            static_cast<std::uint8_t>(v >> 32), static_cast<std::uint16_t>((v >> 40) & 0xFFF),
+            static_cast<std::uint16_t>(v >> 52)};
+  }
+  [[nodiscard]] constexpr std::uint64_t packed() const {
+    return std::uint64_t{lhs} | std::uint64_t{symbol} << 16 | std::uint64_t{dot} << 32 |
+           std::uint64_t{rest} << 40 | std::uint64_t{after} << 52;
+  }
+};
+
 // Whether the token in hand is one several terminals read: then the run
 // stops on the `count` arms from `first` on. By `kind`, tie row `test`, the
 // `n` terminals of `tiedWords` from `test` on, or the matcher's rank `test`.
@@ -460,6 +486,8 @@ struct Tables {
   // The terminals indentation makes, 0 where the language reads none.
   std::uint16_t indentTerminal = 0;
   std::uint16_t dedentTerminal = 0;
+  // The set of `terminalSets` of the trivia whose line ends end a line.
+  std::uint16_t newlineIn = 0;
   // Per terminal, its place where terminals are listed for a reader: the
   // named ones, then the tokens written in the rules.
   const std::uint16_t* terminalOrder = nullptr;
@@ -483,11 +511,15 @@ struct Tables {
   // Per state, the keyword it acts on where it acts on nothing else and the
   // keyword is spelled as a word; `kNoToken` for none.
   const std::uint16_t* forced = nullptr;
-  // Per state, the set of the terminals a repair may have to insert there:
-  // the first of the shortest ends of the constructs it is in. Then the most
-  // tokens the shortest reading of a production takes.
-  const std::uint16_t* closeOf = nullptr;
-  std::uint64_t closeMost = 0;
+  // Per state, its kernel's list of items as `KernelCost`s; per nonterminal,
+  // the nonterminals its derivations begin with, ascending, each with the
+  // fewest tokens past it (`nonterminal | tokens << 16`): what the fewest
+  // tokens that complete a stack are read from.
+  const std::uint16_t* kernelOf = nullptr;
+  const std::uint32_t* kernelAt = nullptr;
+  const std::uint64_t* kernels = nullptr;
+  const std::uint32_t* cornerAt = nullptr;
+  const std::uint32_t* corners = nullptr;
   // Per state, the set of the terminals whose insertion there may be
   // required: those of its `close` set, and those it reduces on that a state
   // reached then may need.

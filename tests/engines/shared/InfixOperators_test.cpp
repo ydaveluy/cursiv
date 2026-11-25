@@ -472,8 +472,9 @@ void spell(const tnonassoc::ast::Expr& expr, std::string& out) {
   out += ')';
 }
 
-std::string read(const cursiv::Parser& parser, std::string_view text) {
-  const std::string source = "nonassoc:" + std::string(text);
+std::string read(const cursiv::Parser& parser, std::string_view text,
+                 std::string_view entry) {
+  const std::string source = std::string(entry) + std::string(text);
   const cursiv::ParseResult r = parser.parse(source);
   const auto* const doc = r.valueAs<tnonassoc::ast::Document>();
   if (!r.accepted || !r.diagnostics.empty() || doc == nullptr ||
@@ -485,8 +486,8 @@ std::string read(const cursiv::Parser& parser, std::string_view text) {
 }
 
 void check(const cursiv::Parser& parser, std::string_view text,
-           std::string_view expected) {
-  const std::string got = read(parser, text);
+           std::string_view expected, std::string_view entry = "nonassoc:") {
+  const std::string got = read(parser, text, entry);
   same_text("Lr", text, got, expected);
 }
 
@@ -513,6 +514,32 @@ void a_chain_behind_a_looser_operator_is_refused(const cursiv::Parser& parser) {
 void parentheses_group_the_chain(const cursiv::Parser& parser) {
   check(parser, "(a <~ b) <~ c", "((a<~b)<~c)");
   check(parser, "a <~ (b <~ c)", "(a<~(b<~c))");
+}
+
+void a_chain_of_a_rule_of_one_level_is_refused(const cursiv::Parser& parser) {
+  check(parser, "a <~ b", "(a<~b)", "alone:");
+  check(parser, "a <~ b <~ c", "<refused>", "alone:");
+}
+
+void an_operator_that_may_begin_with_nothing_groups(
+    const cursiv::Parser& parser) {
+  check(parser, "a -~ b", "(a-~b)", "led:");
+  check(parser, "a -~ b -~ c", "((a-~b)-~c)", "led:");
+  check(parser, "a -~ b -~ c -~ d", "(((a-~b)-~c)-~d)", "led:");
+}
+
+void a_keyword_spelled_as_the_operator_keeps_the_chain_refused(
+    const cursiv::Parser& parser) {
+  check(parser, "a %~ b", "(a%~b)", "twin:");
+  check(parser, "a %~ b %~ c", "<refused>", "twin:");
+  check(parser, "@~ a %~ @~", "a", "twin:");
+  check(parser, "@~ a %~ b %~ @~", "(a%~b)", "twin:");
+  check(parser, "@~ a %~ b %~ c %~ @~", "<refused>", "twin:");
+  check(parser, "a UP b", "(aUPb)", "matched:");
+  check(parser, "a UP b UP c", "<refused>", "matched:");
+  check(parser, "@~ a UP @~", "a", "matched:");
+  check(parser, "@~ a UP b UP @~", "(aUPb)", "matched:");
+  check(parser, "@~ a UP b UP c UP @~", "<refused>", "matched:");
 }
 
 using Offers = std::vector<std::string>;
@@ -553,6 +580,9 @@ void exercise(const cursiv::Parser& parser) {
   a_chain_of_the_level_is_refused(parser);
   a_chain_behind_a_looser_operator_is_refused(parser);
   parentheses_group_the_chain(parser);
+  a_chain_of_a_rule_of_one_level_is_refused(parser);
+  an_operator_that_may_begin_with_nothing_groups(parser);
+  a_keyword_spelled_as_the_operator_keeps_the_chain_refused(parser);
   a_caret_offers_no_chain(parser);
   a_caret_in_dropped_text_reads_from_before_it(parser);
 }
@@ -689,9 +719,9 @@ void run() {
 
 namespace unary_level_cases {
 
-// Prefix and postfix levels in one table: groupings, the
-// operands a looser prefix may not start, the class each level builds, the
-// value its operator writes, and where a line break ends an operand.
+// Prefix and postfix levels in one table: groupings, the operands a prefix
+// begins and a postfix ends, the class each level builds, the value its
+// operator writes, and where a line break ends an operand.
 
 namespace {
 
@@ -704,6 +734,14 @@ std::string_view step_name(Step step) {
 void spell(const ast::Expr& expr, std::string& out) {
   if (const auto* const name = cursiv::ast_cast<ast::Name>(&expr)) {
     out += name->name;
+  } else if (const auto* const block = cursiv::ast_cast<ast::Block>(&expr)) {
+    const bool braced = cursiv::ast_cast<ast::Braced>(&expr) != nullptr;
+    out += braced ? '{' : '[';
+    for (std::size_t i = 0; i < block->items.size(); ++i) {
+      if (i != 0) out += braced ? " ; " : " ";
+      spell(*block->items[i], out);
+    }
+    out += braced ? '}' : ']';
   } else if (const auto* const unary = cursiv::ast_cast<ast::Unary>(&expr)) {
     out += '(';
     out += unary->op;
@@ -776,15 +814,36 @@ void a_postfix_binds_what_is_tighter(const cursiv::Parser& p) {
   check(p, "members:", "a!!", "((a!)!)");
 }
 
-// An operand starts with no prefix looser than its level, and a tighter
-// binary operator takes no looser postfix's result.
-void a_looser_operator_is_refused_inside(const cursiv::Parser& p) {
-  check(p, "unary:", "a < NOT b", "<refused>");
-  check(p, "unary:", "a * NOT b", "<refused>");
+// A prefix begins any operand, whatever binds on its left: its own level
+// only tells how far its operand reads.
+void a_prefix_begins_any_operand(const cursiv::Parser& p) {
+  check(p, "unary:", "a < NOT b", "(a < (NOT b))");
+  check(p, "unary:", "a * NOT b", "(a * (NOT b))");
+  check(p, "unary:", "a * NOT b < c", "(a * (NOT (b < c)))");
+  check(p, "unary:", "a < NOT b AND c", "((a < (NOT b)) AND c)");
+  check(p, "unary:", "a + NOT -b", "(a + (NOT (-b)))");
   check(p, "unary:", "a < (NOT b)", "(a < (NOT b))");
+}
+
+// Where a token begins a prefix operator and the primary, the operator reads.
+void a_prefix_reads_before_the_primary(const cursiv::Parser& p) {
+  check(p, "signs:", "-a", "(-a)");
+  check(p, "signs:", "-a * b", "((-a) * b)");
+  check(p, "signs:", "a * -b", "(a * (-b))");
+  check(p, "signs:", "- -a", "(-(-a))");
+}
+
+// A postfix ends any operand, whatever binds on its right: its own level
+// only tells how far back its operand reads.
+void a_postfix_ends_any_operand(const cursiv::Parser& p) {
+  check(p, "members:", "a! & b", "((a!) & b)");
+  check(p, "members:", "a! & b!", "(((a!) & b)!)");
+  check(p, "members:", "~a! & b", "(((~a)!) & b)");
+}
+
+// A level that groups nothing refuses a chain.
+void what_a_level_refuses(const cursiv::Parser& p) {
   check(p, "unary:", "a < b < c", "<refused>");
-  check(p, "members:", "a! & b", "<refused>");
-  check(p, "members:", "(a!) & b", "((a!) & b)");
 }
 
 void a_level_builds_its_own_class(const cursiv::Parser& p) {
@@ -822,6 +881,11 @@ void a_cyclic_table_reads_its_levels(const cursiv::Parser& p) {
   check(p, "cyclic:", "-a++", "(-(a++))");
   check(p, "cyclic:", "a++ * b", "((a++) * b)");
   check(p, "cyclic:", "a?", "[a?]");
+  // A looser prefix begins the right operand of a tighter operator.
+  check(p, "cyclic:", "a ** -b", "(a ** (-b))");
+  check(p, "cyclic:", "a ** -b * c", "((a ** (-b)) * c)");
+  check(p, "cyclic:", "-a ** b", "(-(a ** b))");
+  check(p, "cyclic:", "a ** b ** c", "(a ** (b ** c))");
   check(p, "guarded:direct:", "a??", "[[a?]?]");
   check(p, "guarded:direct:", "1", "1");
   check(p, "guarded:compound:", "if?", "[if?]");
@@ -888,6 +952,130 @@ void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
   }
 }
 
+// Operators of two levels that may open a line group as their levels tell.
+void levels_that_open_a_line_group(const cursiv::Parser& p) {
+  const struct {
+    std::string_view text, expected;
+  } cases[] = {
+      {"a\n&& b\n|| d\n|| e", "(((a && b) || d) || e)"},
+      {"a\n|| b\n&& d\n|| e", "((a || (b && d)) || e)"},
+      {"a || b && d", "(a || (b && d))"},
+      {"a\n\n|| b\n\n&& d", "(a || (b && d))"},
+      {"a && b\nd || e", "(a && b) ; (d || e)"},
+      {"a\nb", "a ; b"},
+  };
+  for (const auto& sample : cases) {
+    const std::string source = "logic:" + std::string(sample.text);
+    const cursiv::ParseResult r = p.parse(source);
+    const auto* const lines = r.valueAs<ast::Lines>();
+    std::string got = "<refused>";
+    if (r.accepted && r.diagnostics.empty() && lines != nullptr) {
+      got.clear();
+      for (const ast::Expr* const item : lines->items) {
+        if (!got.empty()) got += " ; ";
+        spell(*item, got);
+      }
+    }
+    same_text("Lr", sample.text, got, sample.expected);
+  }
+}
+
+// A line that opens with an operator a looser level's node would give its
+// operand to begins a statement.
+void a_line_ends_what_its_operators_leave(const cursiv::Parser& p) {
+  const struct {
+    std::string_view text, expected;
+  } cases[] = {
+      {"a < b\n-c", "(a < b) ; (-c)"},
+      {"a < b - c", "(a < (b - c))"},
+      {"a < b\n-c * d", "(a < b) ; ((-c) * d)"},
+      {"a * b\n-c", "(a * b) ; (-c)"},
+      {"a < b -\nc", "(a < (b - c))"},
+      {"a < b\n* c", "<refused>"},
+  };
+  for (const auto& sample : cases) {
+    const std::string source = "gapped:" + std::string(sample.text);
+    const cursiv::ParseResult r = p.parse(source);
+    const auto* const lines = r.valueAs<ast::Lines>();
+    std::string got = "<refused>";
+    if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() && lines != nullptr) {
+      got.clear();
+      for (const ast::Expr* const item : lines->items) {
+        if (!got.empty()) got += " ; ";
+        spell(*item, got);
+      }
+    }
+    same_text("Lr", sample.text, got, sample.expected);
+  }
+}
+
+// An operator two gap tests guard leaves its left operand to the looser
+// node wherever one of them fails.
+void an_operator_guarded_twice_ends_where_one_fails(const cursiv::Parser& p) {
+  const struct {
+    std::string_view text, expected;
+  } cases[] = {
+      {"a * b -c", "(a * (b - c))"},
+      {"a * b \n -c", "(a * b) ; (-c)"},
+      {"a * b\n-c", "(a * b) ; (-c)"},
+      {"a * b-c", "<refused>"},
+  };
+  for (const auto& sample : cases) {
+    const std::string source = "spaced:" + std::string(sample.text);
+    const cursiv::ParseResult r = p.parse(source);
+    const auto* const lines = r.valueAs<ast::Lines>();
+    std::string got = "<refused>";
+    if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() && lines != nullptr) {
+      got.clear();
+      for (const ast::Expr* const item : lines->items) {
+        if (!got.empty()) got += " ; ";
+        spell(*item, got);
+      }
+    }
+    same_text("Lr", sample.text, got, sample.expected);
+  }
+}
+
+// Inside `[`, line ends are blanks, to the line's terminal and to a test of
+// the gap alike; inside a `{` they count again, until its `}`.
+void a_block_brings_line_ends_back(const cursiv::Parser& p) {
+  const struct {
+    std::string_view section, text, expected;
+  } cases[] = {
+      {"lines:", "[a {b\nc} d]", "[a {b ; c} d]"},
+      {"lines:", "[{b\n[c\nd]\n}]", "[{b ; [c d]}]"},
+      {"lines:", "[{a\n} b\nc]", "[{a} b c]"},
+      {"lines:", "{a\nb}\nc", "{a ; b} ; c"},
+      {"lines:", "[a {b c} d]", "<refused>"},
+      // A line end inside a comment the grammar names ends a line too.
+      {"lines:", "a /* c\n */ b", "a ; b"},
+      {"lines:", "{a /* c\n */ b}", "{a ; b}"},
+      {"lines:", "[a /* c\n */ b]", "[a b]"},
+      {"lines:", "a /* c\n */\nb", "a ; b"},
+      {"lines:", "a /* c */ .b", "(a . b)"},
+      {"lines:", "a /* c\n */ .b", "(a . b)"},
+      {"gapped:", "[a\n- b]", "[(a - b)]"},
+      {"gapped:", "[a\n< b]\n-c", "[(a < b)] ; (-c)"},
+      {"gapped:", "{a\n-b\n}", "{a ; (-b)}"},
+      {"gapped:", "[{a\n-b\n}\n- c]", "[({a ; (-b)} - c)]"},
+      {"gapped:", "{[a\n-b]\n-c\n}", "{[(a - b)] ; (-c)}"},
+  };
+  for (const auto& sample : cases) {
+    const std::string source = std::string(sample.section) + std::string(sample.text);
+    const cursiv::ParseResult r = p.parse(source);
+    const auto* const lines = r.valueAs<ast::Lines>();
+    std::string got = "<refused>";
+    if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() && lines != nullptr) {
+      got.clear();
+      for (const ast::Expr* const item : lines->items) {
+        if (!got.empty()) got += " ; ";
+        spell(*item, got);
+      }
+    }
+    same_text("Lr", sample.text, got, sample.expected);
+  }
+}
+
 // Blocks nested as deep as a program nests its own cost what they read: sixteen
 // levels at twice the readings per level would last minutes.
 void a_nested_choice_costs_its_depth(const cursiv::Parser& p) {
@@ -929,10 +1117,17 @@ void exercise(const cursiv::Parser& p) {
   the_token_behind_rules_that_read_nothing_is_offered(p);
   a_prefix_binds_what_is_tighter(p);
   a_postfix_binds_what_is_tighter(p);
-  a_looser_operator_is_refused_inside(p);
+  a_prefix_begins_any_operand(p);
+  a_postfix_ends_any_operand(p);
+  a_prefix_reads_before_the_primary(p);
+  what_a_level_refuses(p);
   a_level_builds_its_own_class(p);
   a_cyclic_table_reads_its_levels(p);
   a_newline_ends_what_reads_it(p);
+  levels_that_open_a_line_group(p);
+  a_line_ends_what_its_operators_leave(p);
+  an_operator_guarded_twice_ends_where_one_fails(p);
+  a_block_brings_line_ends_back(p);
   a_nested_choice_costs_its_depth(p);
   a_chain_of_bodies_costs_its_depth(p);
 }

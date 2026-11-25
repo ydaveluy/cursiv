@@ -2456,20 +2456,11 @@ void run() {
            "levels(left('*' | '/'), left('+' | '-'), nonassoc('<'));\n"
            "terminal Num: [0-9]+;",
            "infix rule alone");
-    // An infix rule with unary levels is read as a chain of rules, one per
-    // level, named by their level.
+    // A prefix or postfix level stays in the table with the node it builds.
     expect(support::dump_closure<Q3u::G, Q3u::G::Expr>(),
-           "infix Expr returns Bin(left, op, right) on "
-           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 2, true>: "
-           "left('*');\n"
-           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 2, true> returns "
-           "Expr: {Neg} op='-' operand="
-           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 2, true> | "
-           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 1, true>;\n"
-           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 1, true> returns "
-           "Expr: {Fact} arg="
-           "cursiv::engine::InfixLevel<dump::Q3u::G::Expr, 1, true> bang='!' | "
-           "Num;\n"
+           "infix Expr returns Bin(left, op, right) on Num: "
+           "levels(postfix Fact(arg, bang)('!'), prefix Neg(op, operand)('-'), "
+           "left('*'));\n"
            "Num returns Num: {Num} text=$0;\n"
            "terminal $0: [0-9]+;",
            "infix rule with unary levels");

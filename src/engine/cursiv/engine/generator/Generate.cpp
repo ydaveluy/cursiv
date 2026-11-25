@@ -41,6 +41,7 @@
 #include "cursiv/engine/generator/TextMate.hpp"
 #include "cursiv/engine/grammar/Cfg.hpp"
 #include "cursiv/engine/grammar/Lower.hpp"
+#include "cursiv/engine/grammar/Optimize.hpp"
 #include "cursiv/engine/grammar/Refused.hpp"
 #include "cursiv/engine/grammar/WritesOnce.hpp"
 #include "cursiv/engine/lexer/LexAutomaton.hpp"
@@ -713,6 +714,7 @@ int generate(GrammarImage& image, const LowerDesc& desc, const LanguageNames& na
   try {
     check_writes_once(image, desc);
     Cfg cfg = lower(image, desc);
+    optimize(cfg);
     // The lexer's builder and the automaton as first built are gone once the
     // plan is packed.
     const Packed packed = [&] {

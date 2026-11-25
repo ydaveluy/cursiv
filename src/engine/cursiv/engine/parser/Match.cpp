@@ -21,7 +21,7 @@ bool Matching::echoes(Machine& m, MatchMark mark, TextOffset at) {
   const auto available = static_cast<TextOffset>(m.end - p);
   const char* const end = p + std::min(available, length);
   while (p != end) {
-    const char* const next = end - p > kWatchedBytes ? m.watched(p) : end;
+    const char* const next = m.watched(p, end);
     if (std::memcmp(p, captured, next - p) != 0) return false;
     captured += next - p;
     p = next;
@@ -36,6 +36,19 @@ bool in_set(const std::uint64_t* set, unsigned byte) {
 }
 
 }  // namespace
+
+CURSIV_ALWAYS_INLINE inline bool Matching::holds(Machine& m, const MatchEnd& x, const char* p) {
+  return x.guard == LexTest::none ||
+         (x.guard == LexTest::eof ? m.observe_end(p == m.end) : m.settles(x.waits, p));
+}
+
+CURSIV_ALWAYS_INLINE inline std::size_t Matching::scanned(Machine& m, const MatchTables& a,
+                                                          const MatchExit& e, const char* at) {
+  m.observe_end(true);
+  const std::string_view input(at, m.end);
+  const std::size_t length = a.scans[e.arg](input);
+  return length <= input.size() ? length : 0;
+}
 
 CURSIV_ALWAYS_INLINE inline void Matching::leave(Machine& m, const MatchTables& a,
                                                  const MatchThread& th, const MatchExit& e,
@@ -76,10 +89,8 @@ CURSIV_ALWAYS_INLINE inline void Matching::leave(Machine& m, const MatchTables& 
       return;
     }
     case MatchAction::scan: {
-      m.observe_end(true);
-      const std::string_view input(m.src + at, m.end);
-      const std::size_t length = a.scans[e.arg](input);
-      if (length == 0 || length > input.size()) return;
+      const std::size_t length = scanned(m, a, e, m.src + at);
+      if (length == 0) return;
       const auto past = at + static_cast<TextOffset>(length);
       if (e.ends)
         end(th.call, past, true);
@@ -113,9 +124,7 @@ void Matching::run(Machine& m) {
       const MatchState here = a.states[state];
       for (std::uint32_t k = here.ends, last = a.states[state + 1].ends; k != last; ++k) {
         const MatchEnd x = a.ends[k];
-        if (x.guard != LexTest::none &&
-            !(x.guard == LexTest::eof ? m.observe_end(p == end) : m.settles(x.waits, p)))
-          continue;
+        if (!holds(m, x, p)) continue;
         leave(m, a, th, a.exits[x.exit], static_cast<TextOffset>(p - src - x.back));
       }
       if (here.row == kNoRow) break;
@@ -143,15 +152,11 @@ bool Matching::alone(Machine& m, std::uint32_t entry, const char* begin, const c
       const MatchExit& e = a.exits[x.exit];
       const bool scans = e.action == MatchAction::scan && e.ends;
       if (e.action != MatchAction::end && !scans) return false;
-      if (x.guard != LexTest::none &&
-          !(x.guard == LexTest::eof ? m.observe_end(p == m.end) : m.settles(x.waits, p)))
-        continue;
+      if (!holds(m, x, p)) continue;
       const char* at = p - x.back;
       if (scans) {
-        m.observe_end(true);
-        const std::string_view input(at, m.end);
-        const std::size_t length = a.scans[e.arg](input);
-        if (length == 0 || length > input.size()) continue;
+        const std::size_t length = scanned(m, a, e, at);
+        if (length == 0) continue;
         at += length;
       }
       if (found == nullptr || at > found) found = at;
@@ -264,7 +269,7 @@ void Matching::remember(Machine& m) {
     constexpr auto rewind = std::numeric_limits<decltype(LexResolution::back)>::max();
     if (!found() || (at > _furthest && at - _furthest > rewind))
       m.stretches.try_emplace(key, at, atCut);
-    else if (!_any && _made == 1 && _furthest > at)
+    else if (!_any && _made == 1 && !_jumped && _furthest > at)
       m.stretches.try_emplace(key, _furthest, atCut);
   }
 }

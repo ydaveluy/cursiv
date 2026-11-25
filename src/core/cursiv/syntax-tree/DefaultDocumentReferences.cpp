@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <format>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -58,8 +57,8 @@ void say_provider_threw(const Document* document, std::string_view name,
     language.shared().observabilitySink->publish(
         {.severity = ObservationSeverity::Warning,
          .code = ObservationCode::ReferenceResolutionThrew,
-         .message = std::format("resolving the reference to '{}' threw: {}",
-                                name, what),
+         .message = "resolving the reference to '" + std::string(name) +
+                    "' threw: " + std::string(what),
          .uri = document->uri,
          .languageId = std::string(language.languageMetaData.languageId)});
   } catch (...) {  // NOLINT(bugprone-empty-catch): nothing left to tell it to

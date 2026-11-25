@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <format>
 #include <memory>
 #include <span>
 #include <string>
@@ -80,7 +79,7 @@ void DefaultValidationRegistry::handleException(std::exception_ptr failure,
                              document.textDocument().getText().size())};
   Diagnostic diagnostic{span,
                         DiagnosticSeverity::Error,
-                        std::format("{}: {}", context, what),
+                        std::string(context) + ": " + what,
                         {},
                         {}};
   setDataCode(diagnostic, kValidationError);
@@ -202,12 +201,12 @@ void DefaultValidationRegistry::registerCheck(
     // fire. The usual cause is a grammar's reflection added after its checks.
     if (family.empty())
       throw ValidationRegistrationError(
-          std::format("the check's target type '{}' is not in the workspace "
-                      "reflection -- no node could ever match, so the check "
-                      "would silently never run. Add the grammar's reflection "
-                      "before its checks (`install_language` does), or fix "
-                      "the target",
-                      registration.target->name));
+          "the check's target type '" + std::string(registration.target->name) +
+          "' is not in the workspace "
+          "reflection -- no node could ever match, so the check "
+          "would silently never run. Add the grammar's reflection "
+          "before its checks (`install_language` does), or fix "
+          "the target");
     if (registration.exactTypeOnly)
       family = std::span<const AstTypeTag* const>(&registration.target, 1);
   }

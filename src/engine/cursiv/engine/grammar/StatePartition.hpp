@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <vector>
+
+#include "cursiv/engine/grammar/Refused.hpp"
 
 namespace cursiv::engine::gen {
 
@@ -13,10 +16,13 @@ namespace cursiv::engine::gen {
 std::uint32_t refine_partition(std::vector<std::uint32_t>& blockOf, std::uint32_t blocks,
                                unsigned classes, const auto& edges) {
   const auto n = blockOf.size();
-  std::vector<std::size_t> first(n * classes + 1);
+  std::vector<std::uint32_t> first(n * classes + 1);
+  std::size_t count = 0;
   edges([&](std::uint32_t, std::uint32_t to, unsigned c) {
     ++first[std::size_t{to} * classes + c];
+    ++count;
   });
+  if (count > std::numeric_limits<std::uint32_t>::max()) throw Refused("the automaton has too many transitions");
   std::partial_sum(first.begin(), first.end(), first.begin());
   std::vector<std::uint32_t> from(first.back());
   edges([&](std::uint32_t s, std::uint32_t to, unsigned c) {

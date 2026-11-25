@@ -157,12 +157,17 @@ template <class G, class X>
 struct InGrammar : in_grammar_rule<G, X> {
   static_assert(
       std::is_same_v<std::remove_cvref_t<decltype(G::indent_open)>, Epsilon> &&
+          std::is_same_v<std::remove_cvref_t<decltype(G::indent_block)>,
+                         Epsilon> &&
           std::is_same_v<std::remove_cvref_t<decltype(G::indent_close)>,
+                         Epsilon> &&
+          std::is_same_v<std::remove_cvref_t<decltype(G::indent_newline_in)>,
                          Epsilon> &&
           std::is_void_v<typename G::indent_newline>,
       "a grammar embedded with `section<>` cannot use indentation: its lines "
       "would be measured against the outer document. Embed a grammar that "
-      "declares no `indent_open`, `indent_close` or `indent_newline`");
+      "declares no `indent_open`, `indent_block`, `indent_close`, "
+      "`indent_newline` or `indent_newline_in`");
 };
 
 template <class G, class X>

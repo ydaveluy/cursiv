@@ -38,9 +38,10 @@ class Cactus {
   static constexpr TextOffset kNoHeldEnd = kNoStack;
   static_assert(kMaxDocument < kNoHeldEnd);
 
-  // Forgets every node. The frames of `stack` are then nodes too, each by
-  // its place: a reading stands on that stack with none of it copied.
-  void clear(std::span<const Frame> stack = {}) {
+  // Forgets every node. The frames of `stack`, then the states `above` it,
+  // are then nodes too, each by its place: a reading stands on that stack
+  // with none of its frames copied.
+  void clear(std::span<const Frame> stack = {}, std::span<const std::uint32_t> above = {}) {
     _nodes.clear();
     _ways.resize(1);
     _choices.clear();
@@ -54,14 +55,20 @@ class Cactus {
     _joinBase += static_cast<std::uint32_t>(_joined.size());
     if (_joinBase == 0) std::ranges::fill(_joined, kNoStack);
     _frames = stack.data();
-    _base = static_cast<std::uint32_t>(stack.size());
+    _framed = static_cast<std::uint32_t>(stack.size());
+    _above.assign(above.begin(), above.end());
+    _base = _framed + static_cast<std::uint32_t>(above.size());
   }
   // The first node that is no frame of the stack stood on.
   [[nodiscard]] std::uint32_t base() const { return _base; }
+  // The frames of the stack stood on, up to frame `node`; none for kNoStack.
+  // Asked of a stack with no states above its frames.
+  [[nodiscard]] std::span<const Frame> frames(std::uint32_t node) const { return {_frames, node + 1}; }
   // How many nodes were made.
   [[nodiscard]] std::size_t size() const { return _nodes.size(); }
   [[nodiscard]] std::uint32_t state(std::uint32_t node) const {
-    return node < _base ? _frames[node].state : _nodes[node - _base].state;
+    if (node >= _base) return _nodes[node - _base].state;
+    return node < _framed ? _frames[node].state : _above[node - _framed];
   }
   [[nodiscard]] std::uint32_t parent(std::uint32_t node) const {
     return node < _base ? node - 1 : _nodes[node - _base].parent;
@@ -201,6 +208,8 @@ class Cactus {
   std::vector<std::uint32_t> _kids;
   // The stack stood on.
   const Frame* _frames = nullptr;
+  std::uint32_t _framed = 0;
+  std::vector<std::uint32_t> _above;
   std::uint32_t _base = 0;
   std::uint32_t _revision = 0;
   struct Choice { std::uint32_t arm, path, pending; };
@@ -243,7 +252,7 @@ struct Reading {
   Reading& reading() noexcept { return *this; }
   const Reading& reading() const noexcept { return *this; }
   auto site(std::uint32_t first) const {
-    return std::tuple(node, first, at, tok.end, tok.head, indented.level, indented.depth);
+    return std::tuple(node, first, at, tok.end, tok.head, indented.level, indented.bracket);
   }
 };
 using SplitSite = decltype(Reading{}.site(0));

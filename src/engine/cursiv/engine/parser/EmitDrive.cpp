@@ -61,14 +61,42 @@ struct Cell {
   [[nodiscard]] std::uint32_t wide() const { return element | std::uint32_t{extra} << 16; }
 };
 
+// Lists laid end to end in `words`, each once: a list has the number from one
+// of its first sight, and begins where it was first laid.
+template <class Row>
+class Interned {
+ public:
+  explicit Interned(Row& words) : _words(words) {}
+  Interned(const Interned&) = delete;
+  Interned& operator=(const Interned&) = delete;
+
+  std::uint32_t number(const Row& list) {
+    const auto [it, fresh] = _numbers.try_emplace(list, static_cast<std::uint32_t>(_numbers.size() + 1));
+    if (fresh) {
+      _begins.push_back(static_cast<std::uint32_t>(_words.size()));
+      _words.insert(_words.end(), list.begin(), list.end());
+    }
+    return it->second;
+  }
+  std::uint32_t at(const Row& list) { return _begins[number(list) - 1]; }
+  // Where each list begins, and the end of the last.
+  std::vector<std::uint32_t> offsets() const {
+    std::vector<std::uint32_t> offsets = _begins;
+    offsets.push_back(static_cast<std::uint32_t>(_words.size()));
+    return offsets;
+  }
+
+ private:
+  Row& _words;
+  std::map<Row, std::uint32_t> _numbers;
+  std::vector<std::uint32_t> _begins;
+};
+
 class Emitter {
  public:
   Emitter(const Cfg& cfg, const Packed& packed) : _cfg(cfg), _p(packed) {
     for (const Trivia trivia : packed.terminalTrivia)
       _hides = _hides || trivia == Trivia::hidden;
-    _splits = std::ranges::any_of(packed.states, [&](const PackedState& state) {
-      return state.reduce == kNone && has_arms(state);
-    });
     _preds.resize(packed.states.size());
     for (std::uint32_t s = 0; s < packed.states.size(); ++s)
       for (const PackedAction& action : packed.states[s].actions)
@@ -235,6 +263,7 @@ class Emitter {
     line("  static constexpr bool splits = ", _arms.empty() ? "false" : "true", ";");
     line("  static constexpr ::std::uint16_t dedent = ", _cfg.dedent, ";");
     line("  static constexpr bool indents = ", _cfg.indent != 0 || _cfg.dedent != 0 ? "true" : "false", ";");
+    line("  static constexpr bool linesIn = ", _cfg.newlineIn.empty() ? "false" : "true", ";");
     line("  static constexpr bool hides = ", _hides ? "true" : "false", ";");
     line("  static constexpr bool matching = ", _p.matcher.entries.empty() ? "false" : "true", ";");
     line("  static constexpr ActionCells cells{kLrCells};");
@@ -371,29 +400,11 @@ class Emitter {
     return out;
   }
 
-  // Whether the state's dispatch splits a run: a cell with several actions,
-  // a tie of its mode it chooses on, or terminals a token the matcher read
-  // may stand for alike.
-  bool has_arms(const PackedState& state) const {
-    const auto same = [](const PackedAction& a, const PackedAction& b) {
-      return a.terminal == b.terminal;
-    };
-    if (std::ranges::adjacent_find(state.actions, same) != state.actions.end()) return true;
-    bool splits = false;
-    state.eachMode([&](std::uint16_t mode) {
-      if (!splits) {
-        const auto [ties, matched] = ties_of(state, mode);
-        splits = !ties.empty() || !matched.empty();
-      }
-    });
-    return splits;
-  }
-
   // Lexical ties this state distinguishes in the active mode.
   struct Ties {
     std::vector<std::uint32_t> dfa;
     std::map<std::uint8_t, std::vector<std::uint16_t>> matched;
-    auto operator<=>(const Ties&) const = default;
+    bool operator==(const Ties&) const = default;
   };
   Ties ties_of(const PackedState& state, std::uint16_t mode) const {
     Ties out;
@@ -402,26 +413,38 @@ class Emitter {
       const auto cell = on(state, terminal);
       return cell.size() == 1 && cell.front().kind == PackedAction::Kind::accept;
     };
+    // A tie counts where the state acts on one of its terminals and reads
+    // an alternative, unless a later state can tell the token and this one
+    // acts alike on all.
     for (const auto id : _p.modeTies[mode]) {
       const auto& terminals = _p.ties[id].terminals;
-      if (std::ranges::any_of(std::span(terminals).subspan(1),
-                              [&](auto t) { return !on(state, t).empty(); }) &&
+      const bool later = tells_later(state, _p.ties[id]);
+      if (std::ranges::any_of(terminals, [&](auto t) { return !on(state, t).empty(); }) &&
+          std::ranges::any_of(std::span(terminals).subspan(1), [&](auto t) {
+            return reads(state, t) && !(later && alike(state, terminals.front(), t));
+          }) &&
           !std::ranges::all_of(terminals, accepts))
         out.dfa.push_back(id);
     }
     if (_p.matcher.entries.empty()) return out;
-    // The end of the text has none to read alike.
-    for (const PackedAction& a : state.actions) {
-      if (a.terminal == kEndOfInput || !_p.modeTerminals[mode].test(a.terminal)) continue;
-      const auto rank = _p.terminalRank[a.terminal];
-      for (unsigned r = rank - _p.mixed[a.terminal]; r <= rank; ++r) {
-        auto& alike = out.matched[static_cast<std::uint8_t>(r)];
-        if (alike.empty() || alike.back() != a.terminal) alike.push_back(a.terminal);
-      }
+    // The terminals it reads as its own, ascending. The end of the text has
+    // none to read alike.
+    std::vector<std::uint16_t> own = state.follow;
+    for (const PackedAction& a : state.actions) own.push_back(a.terminal);
+    std::ranges::sort(own);
+    own.erase(std::unique(own.begin(), own.end()), own.end());
+    for (const std::uint16_t terminal : own) {
+      if (terminal == kEndOfInput || !_p.modeTerminals[mode].test(terminal)) continue;
+      const auto rank = _p.terminalRank[terminal];
+      for (unsigned r = rank - _p.mixed[terminal]; r <= rank; ++r)
+        out.matched[static_cast<std::uint8_t>(r)].push_back(terminal);
     }
     std::erase_if(out.matched, [&](const auto& group) {
       const auto& alike = group.second;
       return alike.size() < 2 || std::ranges::all_of(alike, accepts) ||
+             std::ranges::none_of(alike, [&](auto t) {
+               return std::ranges::binary_search(state.actions, t, {}, &PackedAction::terminal);
+             }) ||
              std::ranges::none_of(alike, [&](auto t) { return _p.matcher.matched[t]; });
     });
     return out;
@@ -436,6 +459,39 @@ class Emitter {
     return {begin, end};
   }
 
+  // Whether a state reads `terminal` as its own: it acts on it, or refuses it.
+  static bool reads(const PackedState& state, std::uint16_t terminal) {
+    return !on(state, terminal).empty() || std::ranges::binary_search(state.follow, terminal);
+  }
+
+  // Whether two actions treat the stack, tree and token alike.
+  bool same(const PackedAction& a, const PackedAction& b) const {
+    return a.kind != PackedAction::Kind::reread && a.hops == b.hops && a.key(_cfg) == b.key(_cfg);
+  }
+  // Whether a later state can tell a token of tie `tie` the state keeps: its
+  // terminals are copies of one, which only the parse tells apart, and no
+  // cell reads the text again.
+  bool tells_later(const PackedState& state, const Packed::Tie& tie) const {
+    const auto lexed = [&](std::uint16_t t) {
+      const Terminal& term = _cfg.terminals[t];
+      return std::tuple(std::string_view(term.name), term.entry, term.body, term.twin, term.trivia,
+                        term.keyword, term.word);
+    };
+    return tie.row != kNone && std::ranges::all_of(tie.terminals, [&](auto t) {
+      const auto cell = std::ranges::equal_range(state.actions, t, {}, &PackedAction::terminal);
+      return lexed(t) == lexed(tie.terminals.front()) &&
+             (cell.empty() || cell.back().kind != PackedAction::Kind::reread);
+    });
+  }
+  // Whether a state takes the same actions, at least one, on `a` and `b`.
+  bool alike(const PackedState& state, std::uint16_t a, std::uint16_t b) const {
+    const auto cell = [&](std::uint16_t t) {
+      return std::ranges::equal_range(state.actions, t, {}, &PackedAction::terminal);
+    };
+    const auto x = cell(a);
+    return !x.empty() && std::ranges::equal(x, cell(b), [&](const auto& u, const auto& v) { return same(u, v); });
+  }
+
   // A reduction of `production` is reached, a token in hand or not.
   void reached(std::uint32_t production, bool held) {
     if (_reduced.emplace(production, held).second) _reduces.emplace_back(production, held);
@@ -448,6 +504,11 @@ class Emitter {
   }
   // A name of the engine as the unit of the tables writes it.
   static std::string engine(std::string_view name) { return "::cursiv::engine::" + std::string(name); }
+  // A lexer's test as the tables write it.
+  static std::string lex_test(LexTest test) {
+    static constexpr std::string_view kTests[] = {"none", "match", "word", "eof", "waits"};
+    return engine("LexTest::") + std::string(kTests[static_cast<unsigned>(test)]);
+  }
   // An array of plain values: the unit of the tables defines it, the code
   // reads its declaration.
   template <class Values>
@@ -495,7 +556,11 @@ class Emitter {
     field("terminalSets", _p.terminalSets);
     if (!_p.lexTieEnds.empty()) field("lexTieEnds", _p.lexTieEnds);
     field("followOf", _p.followOf);
-    field("closeOf", _p.closeOf);
+    field("kernelOf", _p.kernelOf);
+    field("kernelAt", _p.kernelAt);
+    field("kernels", _p.kernels);
+    field("cornerAt", _p.cornerAt);
+    field("corners", _p.corners);
     field("mayCloseOf", _p.mayCloseOf);
     field("wordBytes", _p.wordBytes);
     field("terminalRank", _p.terminalRank);
@@ -528,24 +593,15 @@ class Emitter {
     // A state selects a shared list by its one-based index, zero for an empty list.
     const auto lists = [&](std::string name, const auto& source, auto&& get) {
       using Row = std::remove_cvref_t<decltype(get(source.front()))>;
-      std::map<Row, std::uint32_t> known;
-      std::vector<std::uint32_t> of, offsets{0};
       Row words;
+      Interned<Row> known(words);
+      std::vector<std::uint32_t> of;
       for (const auto& item : source) {
         const auto& row = get(item);
-        if (row.empty()) {
-          of.push_back(0);
-          continue;
-        }
-        const auto [it, fresh] = known.try_emplace(row, known.size() + 1);
-        if (fresh) {
-          words.insert(words.end(), row.begin(), row.end());
-          offsets.push_back(static_cast<std::uint32_t>(words.size()));
-        }
-        of.push_back(it->second);
+        of.push_back(row.empty() ? 0 : known.number(row));
       }
       field(name + "Of", of);
-      field(name + "At", offsets);
+      field(name + "At", known.offsets());
       field(name + "Word", words);
     };
     lists("insert", _p.states, [](const PackedState& state) -> const auto& { return state.inserts; });
@@ -555,12 +611,10 @@ class Emitter {
         return a.kind == PackedAction::Kind::reread;
       }));
     field("retries", retries);
-    static constexpr std::string_view kTests[] = {"none", "match", "word", "eof", "waits"};
     values.clear();
     for (const LexResolution& r : _p.resolutions)
       values.push_back("{" + std::to_string(r.token) + "," + std::to_string(r.otherwise) + "," +
-                       std::to_string(r.back) + "," + engine("LexTest::") +
-                       std::string(kTests[static_cast<unsigned>(r.test)]) +
+                       std::to_string(r.back) + "," + lex_test(r.test) +
                        (r.keyword ? ",true," : ",false,") + (r.named ? "true," : "false,") +
                        (r.literal ? "true," : "false,") + std::to_string(r.waits) + "}");
     table(engine("LexResolution"), "kResolutions", values, 4, "{}");
@@ -612,7 +666,7 @@ class Emitter {
     }
     // What an election reads, for a grammar some state of which has several
     // actions on a token.
-    if (_splits) {
+    if (!_arms.empty()) {
       std::vector<std::uint32_t> size;
       for (const Production& p : _cfg.productions)
         size.push_back(static_cast<std::uint32_t>(p.rhs.size()));
@@ -656,7 +710,6 @@ class Emitter {
     line("  t.explore = &drive;");
     line("  t.repair = &drive;");
     line("  t.followWords = ", (_p.terminalElement.size() + 63) / 64, ";");
-    line("  t.closeMost = ", _p.closeMost, "ull;");
     line("  t.modes = kModes;");
     line("  t.skipBytes = kSkip;");
     line("  t.tied = kLrTied;");
@@ -675,6 +728,7 @@ class Emitter {
     line("  t.terminalTrivia = kTerminalTrivia;");
     if (_cfg.indent != 0) line("  t.indentTerminal = ", _cfg.indent, ";");
     if (_cfg.dedent != 0) line("  t.dedentTerminal = ", _cfg.dedent, ";");
+    if (!_cfg.newlineIn.empty()) line("  t.newlineIn = ", _p.newlineIn, ";");
     line("  t.terminalCount = ", _p.terminalElement.size(), ";");
     line("  t.hides = ", _hides ? "true" : "false", ";");
     line("  return t;");
@@ -796,7 +850,6 @@ class Emitter {
     };
     static constexpr std::string_view kActions[] = {"end",   "call",  "jump",   "open", "close",
                                                     "echo",  "ahead", "unless", "scan"};
-    static constexpr std::string_view kGuards[] = {"none", "match", "word", "eof", "waits"};
     // The scanners in use, numbered in their order.
     std::map<std::uint32_t, std::uint32_t> scans;
     for (const MatchExit& e : m.exits)
@@ -830,8 +883,7 @@ class Emitter {
       if (last) break;
       for (const LexAccept& a : m.accepts[state])
         values.push_back("{" + std::to_string(a.term) + ", " + std::to_string(a.waits) + ", " +
-                         std::to_string(a.back) + ", " + engine("LexTest::") +
-                         std::string(kGuards[static_cast<unsigned>(a.guard)]) + "}");
+                         std::to_string(a.back) + ", " + lex_test(a.guard) + "}");
     }
     table(engine("MatchEnd"), "kMatchEnds", values, 4, "{}");
     table(engine("MatchState"), "kMatchStates", states, 6, "{}");
@@ -1383,7 +1435,7 @@ class Emitter {
             .extra = action.gap};
   }
   std::string shift_how(const PackedAction& action) const {
-    static constexpr std::string_view kNestings[] = {"none", "indent", "dedent", "open", "close"};
+    static constexpr std::string_view kNestings[] = {"none", "indent", "dedent", "open", "block", "close"};
     return std::string(action.gap != kAnyGap ? ", true" : ", false") + ", Nesting::" +
            std::string(kNestings[static_cast<unsigned>(_cfg.nesting(action.terminal))]);
   }
@@ -1510,24 +1562,37 @@ class Emitter {
       plain[terminal] = {.value = otherwise, .terminal = terminal, .step = kPass};
     // The arms of a token several terminals read, any of their actions; the
     // last keeps the token as read where a cell of theirs reads it again.
-    std::map<std::vector<std::uint16_t>, TieCheck> branches;
-    const auto branch = [&](const std::vector<std::uint16_t>& terminals) {
-      const auto [it, fresh] = branches.try_emplace(terminals);
+    // Where a later state can tell the token, an action all of them take
+    // keeps it as read too.
+    std::map<std::pair<std::vector<std::uint16_t>, bool>, TieCheck> branches;
+    const auto branch = [&](const std::vector<std::uint16_t>& terminals, bool later) {
+      const auto [it, fresh] = branches.try_emplace({terminals, later});
       if (fresh) {
         const std::size_t first = _arms.size();
+        const auto common = [&](const PackedAction& a) {
+          return later && std::ranges::all_of(terminals, [&](auto t) {
+            return std::ranges::any_of(on(state, t), [&](const PackedAction& b) { return same(a, b); });
+          });
+        };
+        std::vector<PackedAction> taken;
+        for (const PackedAction& a : on(state, terminals.front()))
+          if (common(a)) {
+            arm(ArmToken::held, action_cell(s, a, rowOf));
+            taken.push_back(a);
+          }
         for (const auto t : terminals)
-          for (const PackedAction& a : on(state, t)) arm(ArmToken::tied, action_cell(s, a, rowOf));
+          for (const PackedAction& a : on(state, t))
+            if (!common(a)) {
+              arm(ArmToken::tied, action_cell(s, a, rowOf));
+              taken.push_back(a);
+            }
         const bool retry = std::ranges::any_of(terminals, [&](auto term) {
           const auto cell = std::ranges::equal_range(actions, term, {}, &PackedAction::terminal);
           return !cell.empty() && cell.back().kind == PackedAction::Kind::reread;
         });
         if (retry) arm(ArmToken::held, {.value = s, .step = kRetryTie});
         const Cell split = split_cell(0, first, retry ? 1 : 0);
-        if (!retry) {
-          std::vector<PackedAction> taken;
-          for (const auto t : terminals) std::ranges::copy(on(state, t), std::back_inserter(taken));
-          prefix_predictions(_prefixes, _cfg, _p, s, split.value, taken, true);
-        }
+        if (!retry) prefix_predictions(_prefixes, _cfg, _p, s, split.value, taken, true);
         it->second = {split.value, split.element, split.extra, 0, TieCheck::row, 0};
       }
       return it->second;
@@ -1554,7 +1619,7 @@ class Emitter {
       // the terminals the state acts on that rank alike may read its text too.
       for (auto group = ties.matched.rbegin(); group != ties.matched.rend(); ++group) {
         const auto& [rank, alike] = *group;
-        TieCheck made = branch(alike);
+        TieCheck made = branch(alike, false);
         made.kind = TieCheck::grouped;
         if (std::ranges::any_of(alike, [&](auto t) { return _p.mixed[t]; })) {
           made.kind = TieCheck::ranked;
@@ -1568,16 +1633,15 @@ class Emitter {
       }
       for (auto tie = ties.dfa.rbegin(); tie != ties.dfa.rend(); ++tie) {
         const Packed::Tie& tied = _p.ties[*tie];
-        TieCheck made = branch(tied.terminals);
+        TieCheck made = branch(tied.terminals, tells_later(state, tied));
         made.test = tied.row;
         if (tied.row == kNone) {
           made.kind = TieCheck::alike;
-          made.test = static_cast<std::uint32_t>(_words.size());
+          std::vector<std::uint16_t> read;
           for (const auto t : std::span(tied.terminals).subspan(1))
-            if (!on(state, t).empty()) {
-              _words.push_back(t);
-              ++made.n;
-            }
+            if (reads(state, t)) read.push_back(t);
+          made.test = _lists.at(read);
+          made.n = static_cast<std::uint16_t>(read.size());
         }
         ask(tied.terminals.front(), kTie, check(made));
       }
@@ -1588,9 +1652,8 @@ class Emitter {
       for (const auto& [terminal, cell] : cells) made.cells.push_back(cell);
     }
     if (state.again != kNoMode) {
-      _agains.push_back({s, rowOf.at(state.again), static_cast<std::uint32_t>(_words.size()),
+      _agains.push_back({s, rowOf.at(state.again), _lists.at(state.tested),
                          static_cast<std::uint16_t>(state.tested.size()), state.again});
-      _words.insert(_words.end(), state.tested.begin(), state.tested.end());
     }
   }
 
@@ -1609,10 +1672,10 @@ class Emitter {
     for (std::size_t r = 0; r < _reduces.size(); ++r) {
       const auto [production, held] = _reduces[r];
       const Production& prod = _cfg.productions[production];
-      const bool keeps = held && !names(prod);
+      const bool gives = !held || names(prod);
       for (const PackedGoto& site : _p.gotos[prod.lhs]) {
-        if (!keeps || _p.states[site.target].rereads()) enter(site.target, false);
-        if (keeps) enter(site.target, true);
+        if (gives || _p.states[site.target].rereads()) enter(site.target, false);
+        if (held) enter(site.target, true);
       }
     }
     for (std::uint32_t s = 0; s < _p.states.size(); ++s) {
@@ -1801,7 +1864,8 @@ class Emitter {
       for (const std::uint16_t terminal : _p.ties[tie].terminals)
         if (_matchTied.contains(terminal)) tiesOf[terminal].push_back(tie);
     values.clear();
-    for (std::uint16_t terminal = 0; terminal < nterms; ++terminal) {
+    for (std::size_t t = 0; t < nterms; ++t) {
+      const auto terminal = static_cast<std::uint16_t>(t);
       const std::size_t at = _words.size();
       if (const auto of = tiesOf.find(terminal); of != tiesOf.end())
         for (const std::uint32_t tie : of->second) {
@@ -1842,12 +1906,16 @@ class Emitter {
         if (take != kNone) fuse_of(take);
     }
     // The fuses by number, laid over a comb: where the row of each begins,
-    // and at an inner element's place in it the fused one.
+    // and one column past an inner element the fused one, `kNoElement`
+    // wrapping to the first.
+    const auto column = [&](std::uint32_t inner) {
+      return static_cast<std::uint16_t>(_p.element(inner) + 1);
+    };
     std::vector<std::vector<std::uint32_t>> inners(_fuses.size() + 1);
     for (const auto& [outer, number] : _fuses) {
       const auto begin = _p.fused.lower_bound({outer, 0});
       const auto end = _p.fused.upper_bound({outer, kNone});
-      for (auto it = begin; it != end; ++it) inners[number].push_back(_p.element(it->first.second));
+      for (auto it = begin; it != end; ++it) inners[number].push_back(column(it->first.second));
       std::ranges::sort(inners[number]);
     }
     std::size_t slots = 0;
@@ -1857,7 +1925,7 @@ class Emitter {
       const auto begin = _p.fused.lower_bound({outer, 0});
       const auto end = _p.fused.upper_bound({outer, kNone});
       for (auto it = begin; it != end; ++it)
-        map[fuseAt[number] + _p.element(it->first.second)] = _p.element(it->second);
+        map[fuseAt[number] + column(it->first.second)] = _p.element(it->second);
     }
     // The records, one per call site where they differ, each run written
     // once: a record, then the row of its fuse.
@@ -1966,7 +2034,8 @@ class Emitter {
       if (test.gap != Test::Gap::any) {
         const std::string gap =
             test.gap == Test::Gap::empty  ? "p == " + from
-            : test.gap == Test::Gap::line ? m + ".line_between(p, " + from + ")"
+            : test.gap == Test::Gap::line ? m + ".line_between(p, " + from + ", " +
+                                                (ahead ? "indent" : "m.indented") + ")"
                                           : m + ".gap_reads(" +
                                                 std::to_string(test.gapMonitor) + ", p, " + from +
                                                 ", " + (test.gap == Test::Gap::is ? "true" : "false") +
@@ -2006,11 +2075,19 @@ class Emitter {
   void guard(std::uint32_t cell, std::span<const PackedAction> arms) {
     if (arms.size() > 32) return;
     std::string tests;
-    for (std::size_t a = 0; a < arms.size(); ++a)
-      if (arms[a].kind == PackedAction::Kind::reduce && tested(arms[a].value))
+    std::uint32_t implied = 0;
+    for (std::size_t a = 0; a < arms.size(); ++a) {
+      if (arms[a].kind != PackedAction::Kind::reduce) continue;
+      if (tested(arms[a].value))
         tests += "      if (!holds" + std::to_string(arms[a].value) + "(m, p, tok)) alive &= ~(1u << " +
                  std::to_string(a) + ");\n";
+      if (_cfg.productions[arms[a].value].implied) implied |= 1u << a;
+    }
     if (tests.empty()) return;
+    // An implied token is taken only where no other arm holds.
+    if (implied != 0)
+      tests += "      if ((alive & ~" + std::to_string(implied) + "u) != 0) alive &= ~" +
+               std::to_string(implied) + "u;\n";
     _guards["      {\n"
             "      [[maybe_unused]] const Token tok = m.tok;\n"
             "      [[maybe_unused]] const char* const p = m.at;\n"
@@ -2163,6 +2240,7 @@ class Emitter {
   bool _perState = false;
   std::vector<TieCheck> _ties;
   std::vector<std::uint16_t> _words;
+  Interned<std::vector<std::uint16_t>> _lists{_words};
   std::vector<ReadAgain> _agains;
   std::map<std::uint32_t, std::vector<std::uint32_t>> _sites;
   // The terminals of the arms that read a token the matcher read alike.
@@ -2188,9 +2266,6 @@ class Emitter {
   // Whether the word being written is a function of its own under a called
   // lexer: a token it drops goes back to the lexer.
   bool _ownWord = false;
-  // Whether the dispatch of a state splits a run: the readings that decide it
-  // are then told what they derive.
-  bool _splits = false;
   // Whether a reduction's tests may refuse the token in hand: `again` is
   // written.
   bool _refutes = false;

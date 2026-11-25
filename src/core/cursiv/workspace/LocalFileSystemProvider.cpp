@@ -4,11 +4,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
-#include <format>
-#include <fstream>
-#include <ios>
-#include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -24,9 +22,14 @@ namespace {
 std::filesystem::path local_path(std::string_view uri) {
   const auto path = fileUriToPath(uri);
   if (!path.has_value())
-    throw FileSystemError(std::format("cursiv: '{}' names no local path", uri));
+    throw FileSystemError("cursiv: '" + std::string(uri) +
+                          "' names no local path");
   return std::filesystem::path(*path);
 }
+
+struct FileCloser {
+  void operator()(std::FILE* file) const { std::fclose(file); }
+};
 
 // Use the reported size for the first allocation, then read to EOF. A file
 // may grow after stat, and some virtual files report zero for nonempty data.
@@ -36,33 +39,37 @@ Bytes read_whole(std::string_view uri, std::size_t limit = Bytes{}.max_size()) {
   std::error_code ec;
   const std::uintmax_t size = std::filesystem::file_size(path, ec);
   if (ec)
-    throw FileSystemError(
-        std::format("cursiv: cannot read '{}': {}", uri, ec.message()));
+    throw FileSystemError("cursiv: cannot read '" + std::string(uri) +
+                          "': " + ec.message());
   limit = std::min(limit, Bytes{}.max_size());
-  if (size > limit || size > static_cast<std::uintmax_t>(
-                                 std::numeric_limits<std::streamsize>::max()))
-    throw FileSystemError(
-        std::format("cursiv: '{}' is too large to read", uri));
-  std::ifstream in(path, std::ios::binary);
-  if (!in) throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
+  if (size > limit)
+    throw FileSystemError("cursiv: '" + std::string(uri) +
+                          "' is too large to read");
+#ifdef _WIN32
+  const std::unique_ptr<std::FILE, FileCloser> file(
+      _wfopen(path.c_str(), L"rb"));
+#else
+  const std::unique_ptr<std::FILE, FileCloser> file(
+      std::fopen(path.c_str(), "rb"));
+#endif
+  if (!file)
+    throw FileSystemError("cursiv: cannot read '" + std::string(uri) + "'");
   Bytes bytes(static_cast<std::size_t>(size), typename Bytes::value_type{});
-  in.read(reinterpret_cast<char*>(bytes.data()),
-          static_cast<std::streamsize>(bytes.size()));
-  bytes.resize(static_cast<std::size_t>(in.gcount()));
-  // A short read at EOF is normal (also for text-mode newline conversion).
-  // Other failures must not turn a partial buffer into a successful read.
-  std::array<char, 8192> tail;
+  bytes.resize(std::fread(bytes.data(), 1, bytes.size(), file.get()));
+  // A short read at EOF is normal. Other failures must not turn a partial
+  // buffer into a successful read.
+  std::array<typename Bytes::value_type, 8192> tail;
   for (;;) {
-    if (in.bad() || (in.fail() && !in.eof()))
-      throw FileSystemError(std::format("cursiv: cannot read '{}'", uri));
-    if (in.eof()) break;
-    in.read(tail.data(), static_cast<std::streamsize>(tail.size()));
-    if (static_cast<std::size_t>(in.gcount()) > limit - bytes.size())
-      throw FileSystemError(
-          std::format("cursiv: '{}' is too large to read", uri));
-    const auto* begin =
-        reinterpret_cast<const typename Bytes::value_type*>(tail.data());
-    bytes.insert(bytes.end(), begin, begin + in.gcount());
+    if (std::ferror(file.get()) != 0)
+      throw FileSystemError("cursiv: cannot read '" + std::string(uri) + "'");
+    if (std::feof(file.get()) != 0) break;
+    const std::size_t count =
+        std::fread(tail.data(), 1, tail.size(), file.get());
+    if (count > limit - bytes.size())
+      throw FileSystemError("cursiv: '" + std::string(uri) +
+                            "' is too large to read");
+    bytes.insert(bytes.end(), tail.begin(),
+                 tail.begin() + static_cast<std::ptrdiff_t>(count));
   }
   return bytes;
 }
@@ -77,8 +84,8 @@ FileSystemNode LocalFileSystemProvider::stat(std::string_view uri) const {
   const std::filesystem::file_status status =
       std::filesystem::symlink_status(path, ec);
   if (ec)
-    throw FileSystemError(
-        std::format("cursiv: cannot stat '{}': {}", uri, ec.message()));
+    throw FileSystemError("cursiv: cannot stat '" + std::string(uri) +
+                          "': " + ec.message());
   return {std::filesystem::is_regular_file(status),
           std::filesystem::is_directory(status),
           pathToFileUri(path.string())};
@@ -89,8 +96,8 @@ bool LocalFileSystemProvider::exists(std::string_view uri) const {
   std::error_code ec;
   const bool there = std::filesystem::exists(local_path(uri), ec);
   if (ec)
-    throw FileSystemError(std::format(
-        "cursiv: cannot tell whether '{}' exists: {}", uri, ec.message()));
+    throw FileSystemError("cursiv: cannot tell whether '" + std::string(uri) +
+                          "' exists: " + ec.message());
   return there;
 }
 
@@ -122,8 +129,8 @@ std::vector<FileSystemNode> LocalFileSystemProvider::readDirectory(
     nodes.emplace_back(file, directory, pathToFileUri(it->path().string()));
   }
   if (ec)
-    throw FileSystemError(
-        std::format("cursiv: cannot list '{}': {}", uri, ec.message()));
+    throw FileSystemError("cursiv: cannot list '" + std::string(uri) +
+                          "': " + ec.message());
   return nodes;
 }
 

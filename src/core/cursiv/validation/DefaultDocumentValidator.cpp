@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <format>
 #include <iterator>
 #include <ranges>
 #include <span>
@@ -213,7 +212,7 @@ void DefaultDocumentValidator::attachRepairActions(
   for (const std::string_view spelling : spellings) {
     if (spelling == replaced) continue;
     rows.push_back(detail::make_action_row(
-        std::format("{} '{}'", insert ? "Insert" : "Replace with", spelling),
+        (insert ? "Insert '" : "Replace with '") + std::string(spelling) + "'",
         at, std::string(spelling), document.buildRevision));
   }
   if (rows.empty()) return;

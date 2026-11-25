@@ -109,6 +109,12 @@ struct ImageStageLevelDesc {
   Association group = Association::Left;
   const ImageOpDesc* ops = nullptr;
   std::uint32_t count = 0;
+  // A prefix level's own node, and the member its operand goes to; the
+  // node's type, then its operator and operand members.
+  const void* climbRow = nullptr;
+  const void* operandRow = nullptr;
+  std::string_view returns{};
+  std::string_view members[2]{};
 };
 
 struct ImageStageDesc {
@@ -148,11 +154,14 @@ struct ImageGrammarDesc {
   // The word class a grammar that names none has.
   ImageClassDesc plain{};
   bool caseInsensitive = false;
-  // The brackets between which indentation says nothing, and the terminal
-  // that ends a line, trivia between them; none where not named.
+  // The brackets between which indentation says nothing, those that bring
+  // line ends back, the terminal that ends a line and the trivia whose line
+  // ends end one too; none where not named.
   const ImageDesc* indentOpen = nullptr;
+  const ImageDesc* indentBlock = nullptr;
   const ImageDesc* indentClose = nullptr;
   const ImageRuleDesc* indentNewline = nullptr;
+  const ImageDesc* indentNewlineIn = nullptr;
 };
 
 struct ImageNode {
@@ -185,8 +194,10 @@ struct GrammarImage {
   ImageClassDesc plain;
   bool caseInsensitive = false;
   ImageId indentOpen = kNoImage;
+  ImageId indentBlock = kNoImage;
   ImageId indentClose = kNoImage;
   std::uint32_t indentNewline = kNoImage;
+  ImageId indentNewlineIn = kNoImage;
 
   // The rule read by a call, through any embedded grammar entries.
   std::uint32_t entry_rule(std::uint32_t id) {

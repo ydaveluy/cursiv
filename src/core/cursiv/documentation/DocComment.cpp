@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -447,7 +446,7 @@ std::string render_link_default(std::string_view target,
       if (c == '(' || c == ')' || c == '\\') destination += '\\';
       destination += c;
     }
-    return std::format("[{}]({})", display, destination);
+    return "[" + std::string(display) + "](" + destination + ")";
   };
   std::string_view path = target.substr(colon + 1);
   if (path.starts_with("//")) {

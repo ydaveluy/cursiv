@@ -160,6 +160,9 @@ struct Base : cursiv::GrammarSpec {
   using Probe = terminal<lit<"<"> + mark<A>(some(lit<"=">)) + lit<":"> +
                          same<A> + lit<">">>;
   struct Angle : terminal<lit<"<"> + some(lit<"="> | lit<":">) + lit<">">> {};
+  // The mark may begin on a byte that is not yet a whole character.
+  struct Echo : terminal<mark<A>(any) + same<A>> {};
+  struct Line : terminal<through(mark<A>(some(cr<"^\n">)), lit<"\n"> + same<A>)> {};
 
   struct Root
       : rule<create<Node>(
@@ -175,6 +178,8 @@ struct Base : cursiv::GrammarSpec {
             (lit<"inline:"> + assign<&Node::text>(ref<InlineHelper>)) |
             (lit<"nested:"> + assign<&Node::text>(ref<ViaNested>)) |
             (lit<"probe:"> + &ref<Probe> + assign<&Node::text>(ref<Angle>)) |
+            (lit<"echo:"> + assign<&Node::text>(ref<Echo>)) |
+            (lit<"line:"> + assign<&Node::text>(ref<Line>)) |
             (lit<"raw:"> + assign<&Node::text>(ref<Raw>)))> {};
   using entry = Root;
 };
@@ -195,6 +200,8 @@ struct Base : cursiv::GrammarSpec {
       : terminal<through(lit<"[">, lit<"END"> | lit<"STOP"> | eof)> {};
   struct Nullable : terminal<through(lit<"[">, option(lit<"]">))> {};
   struct EndOnly : terminal<through(lit<"[">, eof)> {};
+  // Where a closer ends inside a longer one, the longest closes.
+  struct Inside : terminal<through(lit<"[">, lit<"aab"> | lit<"a">)> {};
 
   static constexpr auto Open =
       lit<"<<<"> + mark<Label>(some(cr<"A-Z">)) + &lit<"\n">;
@@ -253,7 +260,8 @@ struct Base : cursiv::GrammarSpec {
             (lit<"folded:"> + Read<Folded>) | (lit<"choice:"> + Read<Choices>) |
             (lit<"endchoice:"> + Read<EndChoices>) |
             (lit<"nullable:"> + Read<Nullable>) |
-            (lit<"end:"> + Read<EndOnly>) | (lit<"heredoc:"> + Read<Heredoc>) |
+            (lit<"end:"> + Read<EndOnly>) | (lit<"inside:"> + Read<Inside>) |
+            (lit<"heredoc:"> + Read<Heredoc>) |
             (lit<"explicit:"> + Read<ExplicitHeredoc>) |
             (lit<"padding:"> + Read<Padding>) |
             (lit<"same:"> + Read<SameOnly>) |

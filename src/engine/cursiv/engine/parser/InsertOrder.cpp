@@ -20,9 +20,15 @@ void sort_unique(auto& v) {
 }  // namespace
 
 InsertOrder::InsertOrder(const Cfg& cfg, const LrAutomaton& automaton, const Closers& needs)
-    : _cfg(cfg), _lr(automaton), _needs(needs), _returnsOf(automaton.states.size(), kNoList) {
+    : _cfg(cfg),
+      _lr(automaton),
+      _needs(needs),
+      _returnsOf(automaton.states.size(), kNoList),
+      _read(cfg.terminals.size()) {
   const std::vector<Production>& prods = cfg.productions;
   for (const Production& p : prods) {
+    for (const Symbol y : p.rhs)
+      if (is_terminal(y)) _read.set(y);
     std::size_t from = p.rhs.size();
     while (from > 0 && !is_terminal(p.rhs[from - 1]) && _needs.nullable[index_of(p.rhs[from - 1])]) --from;
     _nullFrom.push_back(static_cast<std::uint32_t>(from));
@@ -144,9 +150,10 @@ std::uint32_t InsertOrder::returns(std::uint32_t state) {
   return _returnsOf[state] = list;
 }
 
-void InsertOrder::of(std::uint32_t state, const Bits& row, std::size_t want,
-                     std::vector<std::uint16_t>& out) {
+void InsertOrder::of(std::uint32_t state, const Bits& row, std::vector<std::uint16_t>& out) {
   out.clear();
+  std::size_t want = 0;
+  row.each([&](std::size_t terminal) { want += _read.test(terminal); });
   _seen.next();
   _met.next();
   _walked.next();

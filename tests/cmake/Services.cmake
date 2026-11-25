@@ -14,7 +14,8 @@ cursiv_test(mcp_test mcp/mcp_test.cpp cursiv::lsp cursiv::mcp wsLsp
 get_target_property(_wsGenDir wsGenerated CURSIV_GENERATED_DIR)
 target_compile_definitions(mcp_test PRIVATE
     CURSIV_WORKSPACE_LANG="${CMAKE_CURRENT_SOURCE_DIR}/languages/workspace"
-    CURSIV_WORKSPACE_GENERATED="${_wsGenDir}")
+    CURSIV_WORKSPACE_GENERATED="${_wsGenDir}"
+    CURSIV_TEST_SCRATCH_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 
 find_program(CURSIV_NODE node)
 if(CURSIV_NODE AND NOT CMAKE_CROSSCOMPILING)

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <format>
 #include <span>
 #include <string>
 #include <string_view>
@@ -74,7 +73,7 @@ std::string spell_expected(std::span<const std::string_view> spellings) {
   std::string out = spellings.size() > 2 ? "one of " : "";
   for (std::size_t at = 0; at < spellings.size(); ++at) {
     if (at != 0) out += spellings.size() == 2 ? " or " : ", ";
-    out += std::format("'{}'", spellings[at]);
+    out.append("'").append(spellings[at]).append("'");
   }
   return out;
 }

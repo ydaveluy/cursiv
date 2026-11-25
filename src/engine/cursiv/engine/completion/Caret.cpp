@@ -28,16 +28,6 @@ namespace cursiv::engine {
 
 namespace {
 
-template<class Context>
-void branch(Forks<Reading, Context>& forks, const Explorer& x, Context context) {
-  if (x.rereads && !forks.enter(x.reading(), x.arms)) return;
-  Reading r = x.reading();
-  for (auto i = x.armCount; i-- > 0;) {
-    r.resume = x.arms + i;
-    forks.open.push_back({r, context});
-  }
-}
-
 // The text before a caret read as far as it goes: the stacks left where the
 // caret stands, and what may be written there.
 class Stand : private Machine::CaretTests {
@@ -104,26 +94,23 @@ class Stand : private Machine::CaretTests {
       }
       return at->second.data();
     };
-    Forks<Reading, Root> paths;
+    // A split met again by a reading that holds the same token and tests
+    // opens nothing.
+    Walk<Root> paths;
     auto& open = paths.open;
     open.push_back({{top, 2 * m.under(), past, Token{nullptr, 0}, m.indented}, {}});
     std::unordered_set<Root, Root::Hash> known;
     std::map<std::tuple<std::uint32_t, TextOffset, std::uint32_t, std::uint32_t, std::uint16_t>, std::uint32_t> readers;
     Explorer::Closure closure{&chain};
-    // Readings that meet read on alike: the first one goes on.
-    std::set<std::tuple<SplitSite, std::uint32_t, std::uint32_t>> met;
-    while (paths.pending()) {
+    while (!open.empty()) {
       throwIfCancelled(_stop);
       auto o = open.back();
       open.pop_back();
-      if (paths.active.empty() &&
-          !met.emplace(o.reading.site(o.reading.resume), o.context.held, o.context.tests).second)
-        continue;
       const auto state = _stacks.state(o.reading.node);
       const std::uint16_t mode = t.stateMode[state];
       chain = o.context.tests;
       closure.context = o.context.held;
-      Explorer x(m, _stacks, o.reading, {.closure = paths.active.empty() ? &closure : nullptr});
+      Explorer x(m, _stacks, o.reading, {.closure = &closure});
       const Exit exit = x.step();
       const Token seen = exit == Exit::shifted ? x.taken : x.tok;
       // A suffix can change which terminal reads the bytes touching the caret.
@@ -145,14 +132,15 @@ class Stand : private Machine::CaretTests {
       }
       o.context.tests = chain;
       if (exit == Exit::split) {
-        branch(paths, x, o.context);
+        if (paths.first(x, std::uint64_t{o.context.held} << 32 | o.context.tests))
+          paths.branch(x, followed(m, _stacks, x, x.arms, x.armCount, x.rereads), o.context);
       } else if (exit == Exit::shifted) {
         if (x.taken.begin(m) == held && x.taken.end == m.end) {
           const auto node = mode != kNoToken ? o.reading.node : _stacks.parent(x.node);
           const auto from = static_cast<TextOffset>(o.reading.at - m.src);
           const auto indent = o.reading.indented;
           const auto [at, added] = readers.try_emplace(
-              std::tuple{node, from, indent.level, indent.depth, x.taken.terminal()}, _readers.size());
+              std::tuple{node, from, indent.level, indent.bracket, x.taken.terminal()}, _readers.size());
           if (added) _readers.push_back({node, from, indent, x.taken.terminal()});
           o.context.held = at->second;
         }
@@ -208,7 +196,7 @@ class Stand : private Machine::CaretTests {
         _modes[at->second].takes[w] |= t.setOf(t.followOf[state])[w];
     }
     struct Continuation { std::uint32_t tests, fresh; };
-    Forks<Reading, Continuation> paths;
+    Walk<Continuation> paths;
     auto& open = paths.open;
     std::map<std::uint32_t, bool> fits;
     // Each feature offered once, in the order first found.
@@ -251,8 +239,9 @@ class Stand : private Machine::CaretTests {
           };
           if (!fits_text(root.tests)) continue;
           closure.context = std::uint64_t{mode.mode} << 32 | root.held;
-          open.assign(1, {{root.node, 2 * state + 1, root.at, pinned, root.indented}, {root.tests, 0}});
-          while (paths.pending()) {
+          paths.clear();
+          open.push_back({{root.node, 2 * state + 1, root.at, pinned, root.indented}, {root.tests, 0}});
+          while (!open.empty()) {
             throwIfCancelled(_stop);
             const auto r = open.back().reading;
             const auto [tests, fresh] = open.back().context;
@@ -262,7 +251,9 @@ class Stand : private Machine::CaretTests {
             x.fresh = fresh;
             const Exit exit = x.step();
             if (exit == Exit::split) {
-              branch(paths, x, {chain, x.fresh});
+              if (paths.first(x, std::uint64_t{chain} << 32 | x.fresh))
+                paths.branch(x, followed(m, _stacks, x, x.arms, x.armCount, x.rereads),
+                             {chain, x.fresh});
               continue;
             }
             if (exit != Exit::shifted || x.taken.terminal() != terminal ||
@@ -410,12 +401,11 @@ class Stand : private Machine::CaretTests {
     };
   };
 
-  // The longest token mode `mode` reads at the start of `text`: what as, how
-  // many bytes, and its rank among tokens that end together.
+  // The longest token mode `mode` reads at the start of `text`: what as, and
+  // how many bytes.
   struct Read {
     std::uint16_t terminal;
     std::size_t length;
-    std::uint8_t rank;
   };
   // The trivia that covers the byte before the caret: where it begins and
   // ends, a null end for none.
@@ -428,7 +418,7 @@ class Stand : private Machine::CaretTests {
   struct Mode {
     std::uint16_t mode;
     std::vector<std::uint64_t> takes;
-    Read replaced{kNoToken, 0, 0};
+    Read replaced{kNoToken, 0};
     TriviaSpan trivia;
     bool inside = false;
   };
@@ -437,8 +427,7 @@ class Stand : private Machine::CaretTests {
     Machine spliced(t, text, _builder.stream(), _stop);
     spliced.read_to(spliced.end, t.terminalCount);
     const Token tok = spliced.walk(spliced.src, mode, 1, spliced.src);
-    return {tok.terminal(), static_cast<std::size_t>(tok.end - spliced.src),
-            tok.terminal() < t.terminalCount ? spliced.rank(tok) : std::uint8_t{0xFF}};
+    return {tok.terminal(), static_cast<std::size_t>(tok.end - spliced.src)};
   }
 
   // Follow ties and lexical retries to the token this stack actually shifts.
@@ -451,7 +440,7 @@ class Stand : private Machine::CaretTests {
     Token tok = m.walk(begin, mode, 1, begin);
     if (!takes(m, _stacks, {root.node, 0, m.src + (root.at - _m.src), tok, root.indented},
                2 * _stacks.state(root.node) + 1, 1, terminal, &tok)) return false;
-    first = {terminal, static_cast<std::size_t>(tok.end - begin), m.rank(tok)};
+    first = {terminal, static_cast<std::size_t>(tok.end - begin)};
     return true;
   }
 
@@ -507,8 +496,7 @@ class Stand : private Machine::CaretTests {
     if (site.inside) return false;
     const auto fits = [&](std::string_view word, Read alone, bool current = false) {
       return (alone.terminal == terminal || elects(terminal, alone, mode, root, word, current)) &&
-             (!current || alone.length == word.size()) &&
-             !beaten(word, mode, alone, current) && holds(tests, word, alone.length) &&
+             (!current || alone.length == word.size()) && holds(tests, word, alone.length) &&
              keeps_before(word, site, root);
     };
     if (!replaced.empty() && fits(replaced, site.replaced, true)) return true;
@@ -520,32 +508,6 @@ class Stand : private Machine::CaretTests {
     for (bool letters : {true, false})
       if (spelling(terminal, site, root, letters, opaque, elected, fits)) return true;
     return opaque && !elected && holds(tests, {}, 0);
-  }
-
-  // Whether another reading at the caret elects another token than `mine`,
-  // what `mode` reads of `text`: one its own mode reads longer, or as long
-  // with a lower rank, and that it acts on.
-  [[nodiscard]] bool beaten(std::string_view word, std::uint16_t mode, const Read& mine,
-                            bool current) {
-    const auto stronger = [&](Read r) {
-      return r.length > mine.length || (r.length == mine.length && r.rank < mine.rank);
-    };
-    for (const Mode& other : _modes) {
-      if (other.mode == mode || other.inside) continue;
-      const Read r = current ? other.replaced : read(splice(_cut, word), other.mode);
-      if (r.terminal >= t.terminalCount || r.terminal == mine.terminal ||
-          ((other.takes[r.terminal / 64] >> (r.terminal % 64)) & 1) == 0)
-        continue;
-      if (!stronger(r)) continue;
-      if (std::ranges::any_of(_roots, [&](const Root& root) {
-        const auto state = _stacks.state(root.node);
-        Read elected = r;
-        return t.stateMode[state] == other.mode && t.inSet(t.followOf[state], r.terminal) &&
-               elects(r.terminal, elected, other.mode, root, word, current) && stronger(elected) &&
-               holds(root.tests, word, elected.length) && keeps_before(word, other, root);
-      })) return true;
-    }
-    return false;
   }
 
   // The trivia covering the last byte before the cut, when the whole gap is trivia.

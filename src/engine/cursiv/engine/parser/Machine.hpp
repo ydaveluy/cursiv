@@ -61,11 +61,13 @@ CURSIV_ALWAYS_INLINE inline Token token(TextOffset begin, const char* end,
   return {end, terminal | std::uint64_t{begin} << 32};
 }
 
-// Where a reading stands in the indentation: its innermost level, and how
-// many brackets it stands in.
+// Where a reading stands in the indentation: its innermost level, and the
+// brackets it stands in, 0 for none (`Machine::Levels::brackets`).
 struct Indented {
   std::uint32_t level = 0;
-  std::uint32_t depth = 0;
+  std::uint32_t bracket = 0;
+  // Whether a line end is a blank here: the innermost bracket mutes it.
+  bool muted() const { return (bracket & 1) != 0; }
   friend bool operator==(const Indented&, const Indented&) = default;
 };
 
@@ -267,11 +269,23 @@ struct Machine {
   // the line.
   // The muted levels the line closes are let go from `at`.
   [[nodiscard]] Token indentation(const char* p, Indented& at);
+  // The token in hand read from `p`, or an empty line terminal before it
+  // where the gap holds a line end inside a trivia the grammar names and
+  // state `state` reads that terminal as it reads a line end standing there.
+  [[nodiscard]] Token line_in_trivia(const char* p, Token tok, std::uint32_t state, Indented at);
   // A reading past the shift of indent `tok`, one with no text repeating the
   // level it stands in, or past a dedent.
   void indent(Indented& at, Token tok, bool muted = false);
   void dedent(Indented& at) const {
     if (at.level != 0) at.level = levels[at.level].outer;
+  }
+  // A reading past the shift of a bracket that opens, line ends blanks
+  // inside it where it `mutes`, or of one that closes.
+  CURSIV_ALWAYS_INLINE void open_bracket(Indented& at, bool mutes) {
+    at.bracket = levels.inner(at.bracket, mutes);
+  }
+  void close_bracket(Indented& at) const {
+    if (at.bracket != 0) at.bracket = levels.outer(at.bracket);
   }
 
   // Hidden trivia read before a token is written when that token is.
@@ -309,12 +323,7 @@ struct Machine {
         const auto here = static_cast<TextOffset>(at - src);
         return stands == 0 ? here : std::max(here, tape.at(stands - 1).end);
       };
-      if (Shapes == kRecordEmpty) {
-        const TextOffset here = standing(records);
-        tape.leaf<true>(here, here, entry);
-        return records;
-      }
-      if (count == 0) {
+      if (Shapes == kRecordEmpty || count == 0) {
         if (!pending.empty()) [[unlikely]] flush();
         const NodeCount stands = tape.records();
         const TextOffset here = standing(stands);
@@ -370,9 +379,12 @@ struct Machine {
   // the room past the top is kept.
   void grow();
   CURSIV_ALWAYS_INLINE bool word_at(const char* p) const { return t.word_width(p, end) != 0; }
-  [[nodiscard]] bool line_between(const char* from, const char* to) const {
+  // Whether a line ends between `from` and `to` for a reading at `at`: none
+  // does where a bracket mutes line ends.
+  [[nodiscard]] bool line_between(const char* from, const char* to, Indented at) const {
+    if (at.muted()) return false;
     while (from != to) {
-      const char* const edge = to - from > kWatchedBytes ? watched(from) : to;
+      const char* const edge = watched(from, to);
       for (; from != edge; ++from)
         if (*from == '\n' || *from == '\r') return true;
     }
@@ -450,9 +462,13 @@ struct Machine {
   // The lexer begins no token past `mark` without reading the stop there,
   // which throws `OperationCancelled`, and moving the mark on.
   void watch(const char* at);
-  // Reads the stop at `at`: how far a reader goes on before it reads it
-  // again.
-  [[nodiscard]] const char* watched(const char* at) const;
+  // How far a reader of the text from `at` up to `to` goes on before it reads
+  // the stop: all of it within a stretch, else a stretch, the stop read first.
+  [[nodiscard]] const char* watched(const char* at, const char* to) const {
+    if (to - at <= kWatchedBytes) return to;
+    throwIfCancelled(stop);
+    return at + kWatchedBytes;
+  }
   // The end of the run of set `run` from `p` on, read by its scanner with
   // the stop watched on the way.
   [[nodiscard]] const char* run_on(std::uint32_t run, const char* p);
@@ -533,18 +549,20 @@ struct Machine {
   // from there again. One made new stands at the start of the text.
   struct Checkpoint {
     std::vector<Frame> frames{{0, 0}};
+    // The id and word of the one record of each stacked symbol that has one:
+    // a later reduction may write over that word in place.
+    std::vector<std::pair<NodeCount, std::uint32_t>> words;
     std::vector<Hidden> pending;
     std::vector<std::uint32_t> plan;
     std::size_t planned = 0;
     NodeCount records = 0;
-    // The last record written, which a later reduction writes over.
-    CstNode last{};
     TextOffset at = 0;
     Token tok{nullptr, 0};
     std::uint32_t resume = 0;
     Indented indented{};
   };
-  // `made` holds the checkpoint before: the frames standing since are kept.
+  // `made` holds the checkpoint before: the frames standing since are kept,
+  // with their words.
   void checkpoint(Checkpoint& made) const;
   void rewind(const Checkpoint& to);
   // How many frames from the bottom stand as they did when `records` records
@@ -711,6 +729,28 @@ struct Machine {
     // Openings arrive in source order until a speculative reading goes back.
     std::size_t ordered = 0;
     std::map<std::array<TextOffset, 4>, std::uint32_t> rest;
+
+    // The brackets met, bracket 0 standing in none, each with the brackets
+    // opened in it. A reading's bracket is twice its index, plus one where
+    // line ends are blanks in it.
+    struct Bracket {
+      std::uint32_t outer = 0;
+      std::array<std::uint32_t, 2> inner{};
+    };
+    std::vector<Bracket> brackets;
+    // The brackets opened in inherited ones, by bracket and mute.
+    std::map<std::uint64_t, std::uint32_t> innerOfBase;
+    std::uint32_t outer(std::uint32_t bracket) const {
+      const std::size_t b = bracket >> 1, n = base ? base->brackets.size() : 0;
+      return b < n ? base->brackets[b].outer : brackets[b - n].outer;
+    }
+    CURSIV_ALWAYS_INLINE std::uint32_t inner(std::uint32_t bracket, bool mutes) {
+      const std::size_t b = bracket >> 1;
+      if (base == nullptr && b < brackets.size())
+        if (const std::uint32_t known = brackets[b].inner[mutes]; known != 0) return known;
+      return opening(bracket, mutes);
+    }
+    std::uint32_t opening(std::uint32_t bracket, bool mutes);
   } levels;
   // Indentation of the last line inspected, after its last form feed.
   const char* blankLine = nullptr;

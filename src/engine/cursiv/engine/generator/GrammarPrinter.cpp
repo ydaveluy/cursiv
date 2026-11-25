@@ -565,6 +565,19 @@ void GrammarPrinter::infix_line(std::string& out, std::uint32_t rule) {
       case Association::Non:
         out += "nonassoc(";
         break;
+      case Association::Prefix:
+      case Association::Postfix: {
+        // A postfix level names its operand first, as the text reads.
+        const bool prefix = level.group == Association::Prefix;
+        out += prefix ? "prefix " : "postfix ";
+        out += level.returns;
+        out += '(';
+        out += level.members[prefix ? 0 : 1];
+        out += ", ";
+        out += level.members[prefix ? 1 : 0];
+        out += ")(";
+        break;
+      }
       default:
         out += "left(";
     }

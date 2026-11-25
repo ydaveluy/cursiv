@@ -6,9 +6,9 @@
 #include "cursiv/grammar/GrammarSpec.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 
-// Prefix and postfix levels in a precedence table: each level reads the one
-// below it as its operand, so a prefix applies to everything that binds
-// tighter than it, and an operand never starts with a looser prefix.
+// Prefix and postfix levels in a precedence table: each applies to everything
+// that binds tighter than it, a prefix may begin any operand and a postfix may
+// end any operand.
 
 namespace tunary {
 
@@ -47,6 +47,8 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
 struct Block : cursiv::Extends<Expr> {
   vector<Expr*> items;
 };
+// A block between braces, whose line ends count inside brackets that mute them.
+struct Braced : cursiv::Extends<Block> {};
 struct Lines : cursiv::Extends<cursiv::AstNode> {
   vector<Expr*> items;
 };
@@ -104,7 +106,40 @@ struct Members : Base {
   };
 };
 
-// A table its primary reaches at its left edge: every level is a rule.
+// A primary that begins with the token a prefix level reads.
+struct Signs : Base {
+  struct Name : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {};
+  struct Primary
+      : rule<ref<Name> | create<ast::Wrapped>(
+                             lit<"-"> + assign<&ast::Wrapped::value>(ref<Name>))> {
+  };
+  struct E : infix<Primary, ast::Binary,
+                   levels(prefix<ast::Signed>(lit<"-">), left(lit<"*">))> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
+  };
+};
+
+// Binary operators that read on within a line only: a line that opens with
+// one begins a statement of its own.
+struct Gapped : Base {
+  struct Name : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {};
+  static constexpr auto sign = lit<"+"> | lit<"-">;
+  template <auto Op>
+  struct Lined : rule<!gap::line + Op> {};
+  struct E;
+  static constexpr auto eos = implied(lit<";">, gap::line | &lit<"}"> | eof);
+  struct Primary
+      : rule<ref<Name> |
+             create<ast::Block>(lit<"["> + many(append<&ast::Block::items>(ref<E>)) + lit<"]">) |
+             create<ast::Braced>(lit<"{"> + many(append<&ast::Block::items>(ref<E>) + eos) +
+                                 lit<"}">)> {};
+  struct E : infix<Primary, ast::Binary,
+                   levels(prefix<ast::Signed>(sign), left(ref<Lined<lit<"*">>>),
+                          left(ref<Lined<sign>>), nonassoc(ref<Lined<lit<"<">>>))> {};
+  struct Root : rule<create<ast::Lines>(many(append<&ast::Lines::items>(ref<E>) + eos)) + eof> {};
+};
+
+// A table its primary reaches at its left edge.
 struct Cyclic : Base {
   struct E;
   struct Primary : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>)) |
@@ -114,9 +149,20 @@ struct Cyclic : Base {
   };
   struct E : infix<Primary, ast::Binary,
                    levels(postfix<ast::Postfix>(as<Step::inc>(lit<"++">)),
-                          prefix<ast::Signed>(lit<"-">), left(lit<"*">))> {};
+                          right(lit<"**">), prefix<ast::Signed>(lit<"-">),
+                          left(lit<"*">))> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
   };
+};
+
+// An operator two gap tests guard: on its operand's line, after a blank.
+struct Spaced : Base {
+  struct Name : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {};
+  struct Minus : rule<!gap::line + gap::has(lit<" ">) + lit<"-">> {};
+  struct E : infix<Name, ast::Binary,
+                   levels(prefix<ast::Signed>(lit<"-">), left(ref<Minus>), left(lit<"*">))> {};
+  static constexpr auto eos = implied(lit<";">, gap::line | eof);
+  struct Root : rule<create<ast::Lines>(many(append<&ast::Lines::items>(ref<E>) + eos)) + eof> {};
 };
 
 struct GuardedTurns : Base {
@@ -146,33 +192,50 @@ struct GuardedTurns : Base {
 };
 
 inline constexpr auto elvis_text = [] { return std::string_view("?:"); };
+inline constexpr auto and_text = [] { return std::string_view("&&"); };
+inline constexpr auto or_text = [] { return std::string_view("||"); };
 
 // A newline read as a token ends a statement; elsewhere it is trivia. A
 // member or `?:` may open a line and an index may not, so an index on the next
 // line starts a statement.
 struct Lines : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<R"( \t)">)> {};
-  struct NEWLINE : terminal<eol> {};
+  // A line end before a member is a blank.
+  struct NEWLINE : terminal<eol + !(many(cr<R"( \t)">) + lit<".">)> {};
   struct NL : terminal<eol> {};
+  struct NOTE : terminal<lit<"/*"> + many(cr<"^*">) + lit<"*/">> {};
   static constexpr auto NLs = many(ref<NEWLINE>);
   struct E;
   struct Name
       : rule<create<ast::Name>(assign<&ast::Name::name>(ref<Base::ID>))> {};
   struct Atom
-      : rule<ref<Name> | create<ast::Block>(lit<"["> +
-                                            many(append<&ast::Block::items>(
-                                                ref<E>)) +
-                                            lit<"]">)> {};
+      : rule<ref<Name> |
+             create<ast::Block>(lit<"["> + many(append<&ast::Block::items>(ref<E>)) + lit<"]">) |
+             create<ast::Braced>(lit<"{"> + NLs +
+                                 option(some(append<&ast::Block::items>(ref<E>),
+                                             some(ref<NEWLINE>)) +
+                                        NLs) +
+                                 lit<"}">)> {};
   struct Postfix
       : rule<ref<Atom> +
             many(nest<ast::Binary, &ast::Binary::left>(
                 (assign<&ast::Binary::op>(lit<"[">) +
                  assign<&ast::Binary::right>(ref<E>) + lit<"]">) |
-                (NLs + assign<&ast::Binary::op>(lit<".">) +
+                (assign<&ast::Binary::op>(lit<".">) +
                  assign<&ast::Binary::right>(ref<Name>))))> {};
   struct Elvis : rule<as<elvis_text>(NLs + lit<"?:">)> {};
   struct Chain : infix<Postfix, ast::Binary, left(ref<Elvis>)> {};
   struct E : infix<Chain, ast::Binary, right(lit<"=">)> {};
+  // Two levels of one table whose operators may open a line.
+  struct Both : infix<Name, ast::Binary,
+                      levels(left(as<and_text>(NLs + lit<"&&">)),
+                             left(as<or_text>(NLs + lit<"||">)))> {};
+  struct Logic
+      : rule<create<ast::Lines>(
+            NLs +
+            option(some(append<&ast::Lines::items>(ref<Both>),
+                        some(ref<NEWLINE>)) +
+                   NLs))> {};
   struct Entry
       : rule<create<ast::Binary>(
             (assign<&ast::Binary::left>(ref<E>) +
@@ -263,19 +326,27 @@ struct Suite : Base {
                      (lit<"bodies:"> + ref<Bodies::Root>) |
                      (lit<"members:"> + ref<Members::Root>) |
                      (lit<"cyclic:"> + ref<Cyclic::Root>) |
+                     (lit<"signs:"> + ref<Signs::Root>) |
+                     (lit<"gapped:"> + ref<Gapped::Root>) |
+                     (lit<"spaced:"> + ref<Spaced::Root>) |
                      (lit<"guarded:"> + ref<GuardedTurns::Root>) |
-                     (lit<"lines:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
+                     (lit<"lines:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
                                            ref<Lines::Root> + eof)) |
                      (lit<"heads:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
                                            ref<Lines::Heads> + eof)) |
+                     (lit<"logic:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
+                                           ref<Lines::Logic> + eof)) |
                      (lit<"empties:"> + ref<Empties::Root> + eof) |
                      (lit<"few:"> + ref<Empties::Few> + eof) |
                      (lit<"blocks:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
                                             ref<Lines::Blocks> + eof))> {};
   using entry = Root;
+  using hidden = Lines::NOTE;
   using indent_newline = Lines::NEWLINE;
+  static constexpr auto indent_newline_in = ref<Lines::NOTE>;
   static constexpr auto indent_open = lit<"[">;
-  static constexpr auto indent_close = lit<"]">;
+  static constexpr auto indent_block = lit<"{">;
+  static constexpr auto indent_close = lit<"]"> | lit<"}">;
 };
 
 // The member table alone, for a fuzz lane: its language is part of the
