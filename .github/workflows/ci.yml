@@ -108,7 +108,11 @@ jobs:
   sanitizers:
     runs-on: ubuntu-26.04
     timeout-minutes: 180
-    container: gcc:16
+    # The thread sanitizer turns address randomisation off, which the
+    # container's default seccomp profile forbids.
+    container:
+      image: gcc:16
+      options: --security-opt seccomp=unconfined
     env:
       CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
       CCACHE_MAXSIZE: 1G
