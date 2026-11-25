@@ -8,6 +8,7 @@
 // no site the document is parsed alone. growth_bench is the same lane over a
 // grammar whose texts fork the LR graph stack.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,7 @@
 #include <vector>
 
 #include "bench.hpp"
+#include "cursiv/PerfCounters.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/Cst.hpp"
 #ifdef GROWTH_BENCH
@@ -188,24 +190,42 @@ int main(int argc, char** argv) {
   };
   std::vector<double> bestOf(1 + alterations.size(), 1e9);
   std::vector<std::size_t> notes(bestOf.size(), 0);
+  // ...and their fewest cycles and instructions, when the PMU answers.
+  cursiv::bench::PerfCounters perf;
+  std::vector<cursiv::bench::PerfReading> fewest(
+      bestOf.size(), {.cycles = UINT64_MAX, .instructions = UINT64_MAX});
+  perf.reset();
+  perf.enable();
   std::uint64_t sink = 0;
   double best = 1e9;
   for (int r = 0; r < reps; ++r) {
     std::uint64_t h = 0;
     std::vector<double> spent(bestOf.size(), 0.0);
+    std::vector<cursiv::bench::PerfReading> counted(bestOf.size());
     const double s = bench::seconds_of([&] {
-      for (std::size_t i = 0; i < docs.size(); ++i)
+      for (std::size_t i = 0; i < docs.size(); ++i) {
+        const cursiv::bench::PerfSample before = perf.read();
         spent[group(i)] += bench::seconds_of([&] {
           cursiv::ParseResult res = parser->parse(docs[i]);
           h ^= fingerprint(res.cst(), res.cst().diagnostics().empty());
           if (r == 0) notes[group(i)] += res.cst().diagnostics().size();
         });
+        const cursiv::bench::PerfSample used =
+            cursiv::bench::perfDelta(before, perf.read());
+        counted[group(i)].cycles += used.cycles;
+        counted[group(i)].instructions += used.instructions;
+      }
     });
     sink ^= h;
     if (s < best) best = s;
-    for (std::size_t g = 0; g < spent.size(); ++g)
+    for (std::size_t g = 0; g < spent.size(); ++g) {
       if (spent[g] < bestOf[g]) bestOf[g] = spent[g];
+      fewest[g].cycles = std::min(fewest[g].cycles, counted[g].cycles);
+      fewest[g].instructions =
+          std::min(fewest[g].instructions, counted[g].instructions);
+    }
   }
+  perf.disable();
   if (print)
     for (const std::string& d : docs) {
       cursiv::ParseResult res = parser->parse(d);
@@ -217,13 +237,18 @@ int main(int argc, char** argv) {
   for (std::size_t g = 0; g < (sites == 0 ? 1 : bestOf.size()); ++g) {
     const double copies = g == 0 ? 1 : static_cast<double>(sites);
     const std::string_view name = g == 0 ? "clean" : alterations[g - 1].name;
-    std::printf("%-8.*s %zu faults %.3f ms/doc %.2f us/fault %.1f notes/doc\n",
+    std::printf("%-8.*s %zu faults %.3f ms/doc %.2f us/fault %.1f notes/doc",
                 static_cast<int>(name.size()), name.data(),
                 g == 0 ? 0 : faults, bestOf[g] * 1e3 / copies,
                 g == 0 ? 0.0
                        : (bestOf[g] / copies - bestOf[0]) * 1e6 /
                              static_cast<double>(faults),
                 static_cast<double>(notes[g]) / copies);
+    if (perf.active())
+      std::printf(" %.0f instr/doc %.0f cycles/doc",
+                  static_cast<double>(fewest[g].instructions) / copies,
+                  static_cast<double>(fewest[g].cycles) / copies);
+    std::printf("\n");
   }
   std::printf("%.*s %zu docs %zu bytes best %.6f s sink %016llx\n",
               static_cast<int>(lang.size()), lang.data(), docs.size(),

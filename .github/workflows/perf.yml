@@ -1,0 +1,71 @@
+name: Performance
+
+# Each pull request's merge result against its target branch: both built alike,
+# benchmarked in alternation, the deltas in the run's summary. A slower
+# benchmark never fails the job.
+on:
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    # The default seccomp profile forbids perf_event_open, and the capability
+    # passes perf_event_paranoid: processor counters, where the host has them.
+    container:
+      image: gcc:16
+      options: --security-opt seccomp=unconfined --cap-add PERFMON
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "4"
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      # Git before the checkout, so that it clones a repository.
+      - name: tools
+        run: apt-get update && apt-get install -y --no-install-recommends ccache cmake git ninja-build python3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      # The gcc-release job's cache: the same compiler, flags and paths.
+      - name: restore compilation cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-v1-ubuntu26-gcc16-gcc-release-${{ github.sha }}
+          restore-keys: ccache-v1-ubuntu26-gcc16-gcc-release-
+      # The target branch is the merge commit's first parent. Both sides use
+      # one source path, one build tree and one configure command.
+      - name: build
+        run: |
+          ccache --zero-stats
+          merge=$(git rev-parse HEAD)
+          for side in base head; do
+            if [ "$side" = base ]; then commit="$merge^1"; else commit="$merge"; fi
+            git checkout -q --detach "$commit"
+            cmake --preset gcc-release -DCURSIV_WARNINGS_AS_ERRORS=ON
+            cmake --build --preset gcc-release --target language_bench recover_bench
+            mkdir -p "$RUNNER_TEMP/$side"
+            cp build/bench/language_bench build/bench/recover_bench "$RUNNER_TEMP/$side/"
+          done
+          ccache --show-stats
+      - name: compare
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: >-
+          python3 tools/bench_compare.py "$RUNNER_TEMP/base" "$RUNNER_TEMP/head"
+          --base-label "$BASE_REF $(git rev-parse --short HEAD^1)"
+          --head-label "#$PR_NUMBER $(git rev-parse --short HEAD)"
+          --summary "$GITHUB_STEP_SUMMARY"

@@ -120,6 +120,22 @@ cmake -DCURSIV_TAG=main -P cmake/GenerateScaffold.cmake
 Include the regenerated `docs/cursiv-new.cmake` in the change; do not edit it
 directly.
 
+## Measure performance
+
+Each pull request runs the performance workflow. It builds `language_bench`
+and `recover_bench` for the target branch and for the merge result with the
+same configuration, runs both on one corpus in alternation, and writes the
+change in time, instructions, cycles and peak memory of each benchmark to the
+run's summary. A change is listed only when it passes the metric's threshold
+and its 99 % interval excludes zero. Instructions and cycles appear only where
+the machine exposes its processor counters.
+
+To compare two local Release builds, give the runs a set of idle cores:
+
+```sh
+python3 tools/bench_compare.py build-base/bench build/bench --cpus 2-9
+```
+
 ## Propose a change
 
 Keep each pull request focused on one problem. Explain the resulting behavior

@@ -736,6 +736,25 @@ std::string rss_json(const Row& row, bool resident) {
   return out + "}";
 }
 
+// The counts of the fastest counted build, per stage: `null` where the PMU did
+// not answer or the stage has no figure.
+std::string perf_json(const Row& row) {
+  std::string out = "{";
+  for (std::size_t stage = 0; stage < kStageCount; ++stage) {
+    if (stage != 0) out += ", ";
+    out += '"';
+    out += kStageName[stage];
+    out += "\": ";
+    const PerfSample& p = row.perf[stage];
+    out += p.valid && row.ms[stage] >= 0.0
+               ? R"({"cycles": )" + std::to_string(p.cycles) +
+                     R"(, "instructions": )" + std::to_string(p.instructions) +
+                     "}"
+               : "null";
+  }
+  return out + "}";
+}
+
 void write_json(const std::string& path, const std::vector<Row>& rows,
                 const std::vector<MultiRow>& multiRows, bool resident) {
   std::string out = "{\n  \"tool\": \"language_bench\",\n  \"rows\": [\n";
@@ -763,7 +782,8 @@ void write_json(const std::string& path, const std::vector<Row>& rows,
     out += "}, \"references\": " + std::to_string(row.references) +
            ", \"resolved\": " + std::to_string(row.resolved) +
            ", \"diagnostics\": " + std::to_string(row.diagnostics) +
-           ", \"rss\": " + rss_json(row, resident) + ", \"lsp\": {";
+           ", \"rss\": " + rss_json(row, resident) +
+           ", \"perf\": " + perf_json(row) + ", \"lsp\": {";
     for (std::size_t s = 0; s < row.lsp.size(); ++s) {
       const auto& service = row.lsp[s];
       if (s != 0) out += ", ";
