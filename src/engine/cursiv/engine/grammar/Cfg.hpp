@@ -141,7 +141,7 @@ struct Production {
   // that prefix onwards, like a turn of a left recursion.
   bool prefixTurn = false;
   // Per symbol, the entry its one record takes over, none where the record
-  // keeps its own: empty where no symbol's does.
+  // keeps its own; may be empty where no symbol's does.
   std::vector<std::uint32_t> takes;
   // The infix node it copies under a test of the gap turned the other way,
   // reduced where a tighter level read past that test; none for an
@@ -287,6 +287,7 @@ struct Cfg {
     std::uint32_t rule;
     std::uint32_t nt;
     std::uint16_t region;
+    bool conditional;
   };
   std::vector<RuleSite> rules;
   // Each distinct flag expression and a rule that contains it.

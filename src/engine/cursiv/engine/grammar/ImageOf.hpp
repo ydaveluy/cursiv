@@ -177,15 +177,17 @@ template <class V, class O, class Cl>
 inline constexpr ImageDesc kNode<V, Through<O, Cl>> = ImageDesc{
     .kind = ImageKind::through, .count = 2, .children = kChildren<V, O, Cl>};
 
+// A tag is shown by its name and told apart by its qualified name.
 template <class V, class Tag, class E>
 inline constexpr ImageDesc kNode<V, Mark<Tag, E>> =
     ImageDesc{.kind = ImageKind::mark,
               .count = 1,
               .children = kChildren<V, E>,
-              .text = kTypeNameView<Tag>};
+              .text = kTypeNameView<Tag>,
+              .text2 = raw_type_name<Tag>()};
 template <class V, class Tag>
-inline constexpr ImageDesc kNode<V, Same<Tag>> =
-    ImageDesc{.kind = ImageKind::same, .text = kTypeNameView<Tag>};
+inline constexpr ImageDesc kNode<V, Same<Tag>> = ImageDesc{
+    .kind = ImageKind::same, .text = kTypeNameView<Tag>, .text2 = raw_type_name<Tag>()};
 
 template <class V, class... Es>
 inline constexpr ImageDesc kNode<V, Seq<Es...>> =

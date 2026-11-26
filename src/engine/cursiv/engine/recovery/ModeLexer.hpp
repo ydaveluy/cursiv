@@ -78,12 +78,13 @@ struct ModeLexer {
   }
   // Whether a terminal of the mode ends in `s`.
   [[nodiscard]] bool accepts(std::uint16_t s) const { return win.at(0, t.lexStates[s].accept) != kWinNone; }
-  // What the mode reads with the automaton in `s` at `p`.
+  // What the mode reads with the automaton in `s` at `p`: nothing where the
+  // terminal would end before the text, past bytes a fault invented.
   [[nodiscard]] Ending ending(std::uint16_t s, TextOffset p, LexWork& work) const {
     // The first bytes of a terminal the matcher reads end nothing.
     LexResolution r = m.reading(win.at(0, t.lexStates[s].accept), m.src + p, &work);
     while (r.test == LexTest::match) r = m.reading(r.otherwise, m.src + p, &work);
-    if (work.cut || r.token == kNoToken) return {};
+    if (work.cut || r.token == kNoToken || r.back > p) return {};
     return {r.token, r.test == LexTest::word && r.otherwise < kWinNone ? r.otherwise : kNoToken,
             p - r.back, r.back != 0 || r.test != LexTest::none, r.literal};
   }

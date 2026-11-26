@@ -8,10 +8,14 @@
 #include "asttreelr/generated/Combined/Module.hpp"
 #include "engines/shared/DirectiveSequenceGrammar.hpp"
 #include "engines/shared/Checks.hpp"
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace directive_sequence_cases {
 
@@ -183,6 +187,8 @@ void a_word_read_in_any_case_names_its_enumerator(const cursiv::Parser& p) {
   check(p, "onecase:", "EQUAL", op_of, "<refused>");
   check(p, "shouts:", "!abcdefghijklmnopqrstuvwxyz !hello", shouts_of,
         "!ABCDEFGHIJKLMNOPQRSTUVWXYZ !HELLO");
+  check(p, "shouts:", "abcdefghijklmnopqrstuvwxyz hello", shouts_of,
+        "abcdefghijklmnopqrstuvwxyz hello");
   check(p, "rewrapped:", "(x)", shape_of, "leaf");
   check(p, "rewrapped:", "((x)!)", shape_of, "wrap(leaf)");
 }
@@ -301,6 +307,44 @@ void a_misspelt_token_keeps_its_text_in_a_call(const cursiv::Parser& parser) {
   check(parser, "k litera;", "", "LITERA", true);
 }
 
+// A text nested deep on either side is kept in a few times its length: the
+// larger side grows in place, not copied again at each level.
+void a_nested_text_is_kept_in_a_few_times_its_length(const cursiv::Parser& parser) {
+  constexpr unsigned kDepth = 1000;
+  // The larger side second, then first; the smaller is kept text, not a view.
+  std::string sources[2], texts[2];
+  texts[1].assign(kDepth, '(');
+  for (unsigned i = 0; i < kDepth; ++i) {
+    sources[0] += "(( ))";
+    texts[0] += "(())";
+    sources[1] += "(";
+    texts[1] += ")()";
+  }
+  for (unsigned i = 0; i < kDepth; ++i) sources[1] += ")( )";
+  for (int side = 0; side < 2; ++side) {
+    tdataparts::seen.clear();
+    const Parsed got = read(parser, "r " + sources[side], false);
+    CHECK(got.clean && got.text == texts[side]);
+    // The bytes the texts read at each level span, each counted once.
+    std::vector<std::pair<std::uintptr_t, std::uintptr_t>> spans;
+    for (const auto text : tdataparts::seen) {
+      const auto at = reinterpret_cast<std::uintptr_t>(text.data());
+      spans.emplace_back(at, at + text.size());
+    }
+    std::ranges::sort(spans);
+    std::size_t kept = 0;
+    std::uintptr_t end = 0;
+    for (const auto& [from, to] : spans) {
+      if (to > end) kept += to - std::max(from, end);
+      end = std::max(end, to);
+    }
+    if (kept >= 8 * texts[side].size())
+      std::printf("  nested side %d keeps %zu bytes for a text of %zu\n", side, kept,
+                  texts[side].size());
+    CHECK(kept < 8 * texts[side].size());
+  }
+}
+
 void every_engine(const cursiv::Parser& parser) {
   a_token_is_a_part(parser);
   a_data_rule_call_is_one_part(parser);
@@ -310,6 +354,7 @@ void every_engine(const cursiv::Parser& parser) {
   a_token_whose_converter_is_no_text_gives_its_spelling(parser);
   a_call_of_one_token_gives_that_token(parser);
   a_misspelt_token_keeps_its_text_in_a_call(parser);
+  a_nested_text_is_kept_in_a_few_times_its_length(parser);
 }
 
 }  // namespace

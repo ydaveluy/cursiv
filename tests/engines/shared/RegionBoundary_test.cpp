@@ -223,6 +223,26 @@ void a_commit_at_the_tail_keeps_the_callers_gap(const Reading& parser) {
   rejects(parser, "commit-note:[,x~,x;");
 }
 
+void leading_runs_keep_their_writes(const Reading& parser) {
+  const auto check = [&](std::string_view source,
+                         std::vector<std::string_view> want) {
+    const auto result = parser.parse(source);
+    CHECK(clean(result));
+    const auto* doc = result.valueAs<Document>();
+    CHECK(doc && doc->items == want);
+    if (doc && doc->items != want) {
+      std::fprintf(stderr, "region runs [%s] %.*s:", parser.engine,
+                   int(source.size()), source.data());
+      for (const auto item : doc->items)
+        std::fprintf(stderr, " '%.*s'", int(item.size()), item.data());
+      std::fprintf(stderr, "\n");
+    }
+  };
+  check("runs:y,z!w.;", {"y,", "z!", "w."});
+  check("runs: y,,z!!.;", {"y,,", "z!!", "."});
+  check("runs:y,!w;", {"y,", "!", "w"});
+}
+
 std::vector<std::string> offered(const Reading& reading, std::string text) {
   const std::size_t caret = text.find("<|>");
   text.erase(caret, 3);
@@ -318,6 +338,7 @@ int main() {
     distinct_tokens_may_share_a_prefix(parser);
     a_nest_at_the_head_keeps_the_callers_gap(parser);
     a_commit_at_the_tail_keeps_the_callers_gap(parser);
+    leading_runs_keep_their_writes(parser);
     a_caret_crosses_the_gap_under_each_candidates_alphabet(parser);
   }
   return cursiv::test::report("RegionBoundary_test");

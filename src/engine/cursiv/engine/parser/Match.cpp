@@ -8,25 +8,67 @@
 
 namespace cursiv::engine {
 
-// The searches under way, the innermost condition's last.
+// The searches under way, the innermost condition's last; and by mark of the
+// token read, the furthest text found to repeat its first bytes, from `from`
+// to `to`, and the Z-function of its first `z.size()` bytes.
 struct Machine::Matchings {
   std::deque<Matching> searches;
+  struct Echo {
+    TextOffset from = 0;
+    TextOffset to = 0;
+    std::vector<TextOffset> z;
+  };
+  std::map<std::uint64_t, Echo> echoes;
+  // By entry and place, read with no mark: the ends a search of the token
+  // found, and whether a search read it every way. What is known may rest on
+  // the end of the text where the token read it since `reads`.
+  struct Known {
+    std::map<TextOffset, TextOffset> ends;
+    bool whole = false;
+  };
+  std::map<std::uint64_t, Known> known;
+  std::uint64_t reads = 0;
 };
 
+// Reads as the Z-algorithm: inside the furthest repeat of the mark found, the
+// mark's own Z-function gives what repeats, and only bytes past it are read.
 bool Matching::echoes(Machine& m, MatchMark mark, TextOffset at) {
   if (mark.end == kNoMark) return false;
   const auto length = mark.end - mark.begin;
-  const char* p = m.src + at;
-  const char* captured = m.src + mark.begin;
-  const auto available = static_cast<TextOffset>(m.end - p);
-  const char* const end = p + std::min(available, length);
-  while (p != end) {
-    const char* const next = m.watched(p, end);
-    if (std::memcmp(p, captured, next - p) != 0) return false;
-    captured += next - p;
-    p = next;
+  const char* const captured = m.src + mark.begin;
+  const auto available = static_cast<TextOffset>(m.end - m.src) - at;
+  auto& known = m.matchings->echoes[std::uint64_t{mark.begin} << 32 | mark.end];
+  // How many bytes of the mark `x`, at place `i`, repeats, up to `limit`; the
+  // furthest repeat found, from `from` to `to`, moves on past them.
+  const auto repeats = [&](TextOffset& from, TextOffset& to, const char* x, TextOffset i,
+                           TextOffset limit) {
+    TextOffset k = from <= i && i < to ? std::min(to - i, known.z[i - from]) : 0;
+    while (k < limit) {
+      const char* const next = m.watched(x + k, x + limit);
+      const char* const differs = std::mismatch(x + k, next, captured + k).first;
+      k = static_cast<TextOffset>(differs - x);
+      if (differs != next) break;
+    }
+    if (i + k > to) {
+      from = i;
+      to = i + k;
+    }
+    return k;
+  };
+  if (const TextOffset w = known.to - known.from;
+      known.from <= at && at < known.to && known.z.size() < w) {
+    const TextOffset size = w + std::min(w, length - w);
+    known.z.assign(size, size);
+    for (TextOffset i = 1, l = 0, r = 0; i < size; ++i) {
+      watch();
+      known.z[i] = repeats(l, r, captured + i, i, size - i);
+    }
   }
-  return !m.observe_end(available < length);
+  const TextOffset same =
+      repeats(known.from, known.to, m.src + at, at, std::min(length, available));
+  if (same == length) return true;
+  m.observe_end(same == available);
+  return false;
 }
 
 namespace {
@@ -130,8 +172,9 @@ void Matching::run(Machine& m) {
       if (here.row == kNoRow) break;
       if (here.run != 0) {
         const std::uint32_t run = here.run - 1u;
-        const char* const r = m.t.runScanners[run](m.t.runSets + run * 256u, p, m.mark);
-        p = r < m.mark ? r : m.run_on(run, p);
+        const char* const bound = _made < kUnchecked ? m.mark : limit;
+        const char* const r = m.t.runScanners[run](m.t.runSets + run * 256u, p, bound);
+        p = r < bound ? r : m.run_on(run, r);
       }
       if (p >= limit) [[unlikely]]
         if (m.observe_end(p == end) || !passes(m, th, state, p, limit)) break;
@@ -170,19 +213,23 @@ bool Matching::alone(Machine& m, std::uint32_t entry, const char* begin, const c
 
 void Matching::call(Machine& m, std::uint32_t callee, const MatchThread& then,
                     const std::uint64_t* suffix) {
-  // A call starts with no mark; one a whole search found to read nothing
-  // reads nothing again.
+  // A call starts with no mark, from the ends the token's searches found for
+  // it; it reads nothing where a whole search found it read nothing, and is not
+  // read again where a search read it every way.
   if (m.unmatched(stretch_place(kUnmatched, callee, then.at))) return;
   const auto [known, fresh] =
       _callOf.try_emplace({callee, then.at}, static_cast<std::uint32_t>(_calls.size()));
   const std::uint32_t called = known;
   if (fresh) {
-    _calls.push_back({{callee, then.at}});
+    const auto found = m.matchings->known.find(stretch_place(kUnmatched, callee, then.at));
+    const bool seen = found != m.matchings->known.end();
+    if (seen) m.observe_end(m.endReads != m.matchings->reads);
+    _calls.push_back({{callee, then.at}, kNoLink, seen ? found->second.ends : Ranges{}});
     MatchThread first;
     first.entry = callee;
     first.at = then.at;
     first.call = called;
-    go(first);
+    if (!seen || !found->second.whole) go(first);
   }
   Call& c = _calls[called];
   _callers.push_back({then, suffix, c.callers});
@@ -256,12 +303,19 @@ bool Matching::propagate(Machine& m) {
 
 void Matching::remember(Machine& m) {
   const bool atCut = m.endReads != _endReads;
+  const bool whole = !_any || !found();
   for (std::size_t k = _any || found() ? 1u : 0u; k < _calls.size(); ++k) {
     watch();
     const Place p = _calls[k].called;
-    if (_calls[k].ends.empty())
-      m.stretches.try_emplace(stretch_place(kUnmatched, p.entry, p.at), p.at, atCut);
+    const std::uint64_t key = stretch_place(kUnmatched, p.entry, p.at);
+    if (whole && _calls[k].ends.empty()) m.stretches.try_emplace(key, p.at, atCut);
+    if (!_any) continue;
+    Machine::Matchings::Known& known = m.matchings->known[key];
+    known.whole = known.whole || whole;
+    for (const auto& [first, last] : _calls[k].ends)
+      add(known.ends, first, last, [](TextOffset, TextOffset) {});
   }
+  if (!whole) return;
   for (const auto key : _passed) {
     watch();
     const auto at = static_cast<TextOffset>(key);
@@ -280,34 +334,56 @@ const char* Machine::match(std::uint32_t entry, const char* begin) {
   const std::uint64_t place = stretch_place(kUnmatched, entry, from);
   if (unmatched(place)) return nullptr;
   if (!matchings) matchings = {new Matchings, [](Matchings* gone) { delete gone; }};
+  matchings->echoes.clear();
+  matchings->known.clear();
+  matchings->reads = endReads;
   std::deque<Matching>& searches = matchings->searches;
   if (searches.empty()) searches.emplace_back();
   MatchThread first;
   first.entry = entry;
   first.at = from;
   searches[0].start(*this, first, false);
-  // A condition's search goes on top of the one that asked it, and its
-  // answer goes back once it is done.
+  // A condition's search goes on top of the one that asked it, and its answer
+  // goes back once it is done; asked with no mark, it answers from what the
+  // token's searches know of it.
   std::size_t top = 0;
   Matching* s = &searches[0];
   for (;;) {
     s->run(*this);
     if (s->propagate(*this)) continue;
+    bool holds = false;
     if (!s->done()) {
       const Matching::Asked& asked = s->asked.back();
-      if (searches.size() == ++top) searches.emplace_back();
-      MatchThread read = asked.then;
-      read.entry = asked.entry;
-      read.call = 0;
-      searches[top].start(*this, read, true);
-      s = &searches[top];
-      continue;
+      const std::uint64_t key = stretch_place(kUnmatched, asked.entry, asked.then.at);
+      const auto known = asked.then.marks == decltype(asked.then.marks){}
+                             ? matchings->known.find(key)
+                             : matchings->known.end();
+      if (known == matchings->known.end()) {
+        if (searches.size() == ++top) searches.emplace_back();
+        MatchThread read = asked.then;
+        read.entry = asked.entry;
+        read.call = 0;
+        searches[top].start(*this, read, true);
+        s = &searches[top];
+        continue;
+      }
+      holds = !known->second.ends.empty();
+      observe_end(endReads != matchings->reads);
+    } else {
+      if (top == 0) break;
+      holds = s->found();
+      s->remember(*this);
+      const TextOffset furthest = s->furthest();
+      s = &searches[--top];
+      const Matching::Asked& asked = s->asked.back();
+      if (asked.then.marks == decltype(asked.then.marks){}) {
+        auto& known = matchings->known[stretch_place(kUnmatched, asked.entry, asked.then.at)];
+        if (!holds)
+          known.whole = true;
+        else if (known.ends.empty())
+          known.ends.emplace(furthest, furthest);
+      }
     }
-    if (top == 0) break;
-    const bool holds = s->found();
-    // A condition that does not hold was read every way.
-    if (!holds) s->remember(*this);
-    s = &searches[--top];
     const Matching::Asked asked = s->asked.back();
     s->asked.pop_back();
     if (holds != asked.unless) s->go(asked.then);

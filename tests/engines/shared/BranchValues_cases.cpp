@@ -69,6 +69,9 @@ void built(std::string_view text, std::string_view want, Show show) {
 }
 std::string flag_of(const ast::Item& i) { return i.flag ? "true" : "false"; }
 std::string count_of(const ast::Item& i) { return std::to_string(i.count); }
+std::string reading_of(const ast::Item& i) {
+  return i.reading.value ? std::to_string(*i.reading.value) : "none";
+}
 
 void values(std::string_view text, std::string_view want) {
   const std::string source(text);
@@ -218,6 +221,8 @@ void run() {
         "clean a=3 b=42 c=5 d=4 e=2 ", count_of);
   built("count: a # ; b # 4x2; c % ( abc ; d % [ p q ;", "a=0 b=4 c=0 d=0 ",
         count_of);
+  // A value that only looks like a conversion result is the value itself.
+  built("count: a @ x y z;", "clean a=3 ", reading_of);
   built("count: c % ( abc ] ; d % [ p q ) ; e # x 1 y ; f % ( g h ) ;",
         "c=0 d=0 e=2 f=3 ", count_of);
 

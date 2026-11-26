@@ -345,12 +345,29 @@ int main() {
     CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
           r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted);
   }
+  // Thirty tokens missing deep in a production of three hundred symbols are
+  // one run of insertions, cheaper than two apart in the other branch.
+  {
+    const Entry longRun{"longrun:"};
+    std::string text;
+    for (int i = 0; i < 270; ++i) text += "x ";
+    text += ";";
+    for (int i = 0; i < 40; ++i) text += " n";
+    const std::string source = longRun.source(text);
+    const auto r = conformance_test::parser().parse(source);
+    CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
+          r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted);
+  }
   // A comment left open at the end is read as one and the brace inserted: a
-  // name invented before it would leave more to insert at the end. However
-  // long, the comment is walked once, whatever mode reaches it.
+  // name invented before it would leave more to insert, at the end or on the
+  // next lines. However long, and over however many lines, the comment is
+  // walked once, whatever mode reaches it.
   {
     const Entry divided{"divided:"};
-    for (const std::string& text : {std::string("{ a ; /* b"), "{ a ; /* " + std::string(1 << 20, 'b')}) {
+    std::string lines = "{ a ; /* b";
+    for (int i = 0; i < 1 << 18; ++i) lines += "\n}";
+    for (const std::string& text : {std::string("{ a ; /* b"), std::string("{ a ; /* b\nb\nb"),
+                                    "{ a ; /* " + std::string(1 << 20, 'b'), lines}) {
       const std::string source = divided.source(text);
       const auto r = conformance_test::parser().parse(source);
       CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
@@ -452,6 +469,9 @@ int main() {
   const Entry guardedLiteral{"guardedliteral:"};
   won(guardedLiteral, "if;", "if", "");
   won(guardedLiteral, "if(", "", "if");
+  const Entry fallbackKeyword{"fallbackkeyword:"};
+  expect(fallbackKeyword, "x/**/", true);
+  expect(fallbackKeyword, "x/", true);
   const Entry literalBesideGuard{"literalbesideguard:"};
   won(literalBesideGuard, "if", "if", "");
   won(literalBesideGuard, "iff", "", "iff");

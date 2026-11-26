@@ -74,6 +74,7 @@ struct G : cursiv::GrammarSpec {
 }  // namespace folded
 
 namespace repaired {
+inline constexpr auto bracket = [](std::string_view) { return std::string_view("["); };
 // Three-byte delimiters can be re-read with two unchanged bytes and one
 // typo. The following statement must still see its own newline and level.
 struct G : cursiv::GrammarSpec {
@@ -92,7 +93,16 @@ struct G : cursiv::GrammarSpec {
                      (ref<NEWLINE> | eof)))> {};
   struct Root : rule<create<ast::Node>(
                     many(append<&ast::Node::body>(ref<Stmt>)))> {};
-  using entry = Root;
+  // Behind `$`, indentation tokens that convert what they read: the indent
+  // spells a bracket in the text of a data rule, the dedent counts one.
+  struct OPEN : terminal<as<bracket>(indent)> {};
+  struct CLOSE : terminal<as<std::int64_t{1}>(dedent)> {};
+  struct Head : rule<ref<OPEN> + ref<ID>> {};
+  struct Converted
+      : rule<create<ast::Counted>(lit<"$"> + ref<NEWLINE> + assign<&ast::Node::name>(ref<Head>) +
+                                  ref<NEWLINE> + assign<&ast::Counted::dedents>(ref<CLOSE>))> {};
+  struct Case : rule<ref<Root> | ref<Converted>> {};
+  using entry = Case;
   using ignored = list<WS, NL>;
   static constexpr auto indent_open = lit<"[[[">;
   static constexpr auto indent_close = lit<"]]]">;
@@ -400,20 +410,35 @@ struct G : Plain {
 };
 }  // namespace named
 
-// The bracket, newline and suite cases use the same lexical policy.
+// The bracket, newline and suite cases use the same lexical policy. Behind
+// `lead`, deeper comment lines before the first statement: a newline after a
+// `#` comment, then `;` comments one token reads from the line's start.
 struct G : Plain {
+  struct LEAD : terminal<some(many(cr<R"( \t)">) + lit<";"> + many(cr<R"(^\r\n)">) + eol)> {};
   struct Case : rule<ref<Plain::Root> | (kw<"joined"> + ref<joined::G::Top>) |
                      (kw<"guarded"> + ref<guarded::G::Root>) |
                      (kw<"single"> + ref<single::G::Root>) |
-                     (kw<"named"> + ref<named::G::Root>)> {};
+                     (kw<"named"> + ref<named::G::Root>) |
+                     (kw<"lead"> + ref<NEWLINE> + option(ref<NEWLINE>) + option(ref<LEAD>) +
+                      ref<Plain::Root>)> {};
   using entry = Case;
 };
 
 namespace folded {
+// Behind `crlf`, a blank that reads CR LF alone: inside brackets a lone LF is
+// a blank all the same.
 struct Cases : G {
+  struct CRLF : terminal<lit<"\r\n">> {};
+  struct Word : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
   struct Case : rule<ref<G::Root> |
-                     (kw<"validation"> + ref<validation::G::Root>)> {};
+                     (kw<"validation"> + ref<validation::G::Root>) |
+                     (kw<"crlf"> + skip(ignore<WS, CRLF>, hide<>,
+                                        create<ast::Node>(lit<"("> +
+                                                          append<&ast::Node::body>(ref<Word>) +
+                                                          lit<")"> + ref<NEWLINE>)))> {};
   using entry = Case;
+  static constexpr auto indent_open = lit<"(">;
+  static constexpr auto indent_close = lit<")">;
 };
 }  // namespace folded
 

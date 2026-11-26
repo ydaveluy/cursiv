@@ -39,7 +39,7 @@ class ParseResultBuilder {
   template <class T>
   CURSIV_NOINLINE T* createNode(NodeId id) {
     T* const node = _arena.make<T>();
-    node->cstNodeId = id;
+    node->AstNode::cstNodeId = id;
     try {
       CURSIV_INLINE_CALLS _tree.nodes.emplace_back(node);
     } catch (...) {
@@ -61,9 +61,12 @@ class ParseResultBuilder {
     ++_attached;
   }
 
-  // `parts` joined, as text that lives as long as the tree.
-  [[nodiscard]] std::string_view keepText(std::span<const std::string_view> parts) const {
-    return _tree.keepText(parts, &_joined);
+  // `parts` joined, as text that lives as long as the tree, which `last`
+  // then holds: grown in place from `last` where that is one of them.
+  using Joined = ParseResult::Tree::Joined;
+  [[nodiscard]] std::string_view keepText(std::span<const std::string_view> parts,
+                                          Joined* last = nullptr) const {
+    return _tree.keepText(parts, last);
   }
 
   // Binds the reference `slot`, member `member` of `owner` and element
@@ -91,7 +94,6 @@ class ParseResultBuilder {
 
   ParseResult& _out;
   ParseResult::Tree& _tree;
-  mutable ParseResult::Tree::Joined _joined;
   // Where the next node is made, on the tree's pool.
   detail::AstArena _arena;
   // What answers the references and lists them: null for a language with no

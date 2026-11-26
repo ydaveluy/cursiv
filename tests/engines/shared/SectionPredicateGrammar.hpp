@@ -70,6 +70,16 @@ struct Reach : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// The same predicate, read through a data rule.
+struct ReachRule : Reach {
+  struct Ahead : rule<ref<ID> + lit<">">> {};
+  struct Mark : rule<create<ast::Marked>(&ref<Ahead> +
+                                         assign<&ast::Item::text>(ref<ID>))> {};
+  struct Root : rule<create<ast::Items>(
+                    many(append<&ast::Items::items>(ref<Mark> | ref<Plain>)))> {};
+  using entry = Root;
+};
+
 // Tokens that stay open in a section, read up to the token that closes it.
 struct Quoted : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
@@ -180,6 +190,7 @@ struct Suite : Last {
   struct Root : rule<ref<Last::Root> | (lit<"reach:"> + ref<Reach::Root>) |
                      (lit<"inlast:"> + ref<Host<Last>::Root>) |
                      (lit<"inreach:"> + ref<Host<Reach>::Root>) |
+                     (lit<"inreachrule:"> + ref<Host<ReachRule>::Root>) |
                      (lit<"inquoted:"> + ref<Host<Quoted>::Root>) |
                      (lit<"inhushed:"> + ref<Host<Hushed>::Root>) |
                      (lit<"values:"> + ref<SectionValues::Root>)> {};

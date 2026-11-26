@@ -192,7 +192,7 @@ std::uint32_t LexAutomatonBuilder::add_monitor(const LexAutomatonBuilder& reads)
       if (a.guard == LexTest::word) throw NotRegular{"a keyword's test inside a condition"};
       if (a.guard == LexTest::waits)
         throw NotRegular{"a condition inside a condition that reads too far"};
-      flags |= a.guard == LexTest::none ? 3 : 2;
+      flags |= a.guard != LexTest::none ? 2 : a.back == 0 ? 3 : 1;
     }
     made.flags.push_back(flags);
   }
@@ -441,7 +441,7 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
   std::unordered_map<ImageId, std::pair<ImageId, ImageId>> sides;
   std::unordered_set<ImageId> begun;
   const auto tests = [&](ImageId id) {
-    const ImageKind kind = _image.nodes[bare(id)].kind;
+    const ImageKind kind = _image.nodes[_image.bare(id)].kind;
     return kind == ImageKind::notOf || kind == ImageKind::andOf;
   };
   // The one part of a sequence that reads, none where several do.
@@ -458,7 +458,7 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
   std::vector<ImageId> parts, literal, other;
   while (!open.empty()) {
     const auto [id, ready] = open.back();
-    const ImageId at = bare(id);
+    const ImageId at = _image.bare(id);
     if (sides.contains(at)) {
       open.pop_back();
       continue;
@@ -487,7 +487,7 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
       literal.clear();
       other.clear();
       for (std::uint32_t i = 0; i < n.count; ++i) {
-        const auto [l, o] = sides.at(bare(_image.children[n.first + i]));
+        const auto [l, o] = sides.at(_image.bare(_image.children[n.first + i]));
         if (l != kNoImage) literal.push_back(l);
         if (o != kNoImage) other.push_back(o);
       }
@@ -496,13 +496,13 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
         if (arms.size() == 1) return arms.front();
         return arms.size() == n.count && std::equal(arms.begin(), arms.end(),
                                                      _image.children.begin() + n.first,
-                                                     [&](ImageId a, ImageId c) { return a == bare(c); })
+                                                     [&](ImageId a, ImageId c) { return a == _image.bare(c); })
                    ? at
                    : _image.group(ImageKind::choice, arms);
       };
       side = {made(literal), made(other)};
     } else if (n.kind == ImageKind::seq && read != n.count) {
-      const ImageId part = bare(_image.children[n.first + read]);
+      const ImageId part = _image.bare(_image.children[n.first + read]);
       const auto [l, o] = sides.at(part);
       const auto made = [&](ImageId with) {
         if (with == kNoImage) return kNoImage;
@@ -515,7 +515,7 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
     }
     sides.emplace(at, side);
   }
-  const auto [l, o] = sides.at(bare(body));
+  const auto [l, o] = sides.at(_image.bare(body));
   std::vector<std::pair<ImageId, bool>> out;
   if (l != kNoImage) out.emplace_back(l, true);
   if (o != kNoImage) out.emplace_back(o, false);
@@ -545,7 +545,7 @@ void LexAutomatonBuilder::add(std::uint16_t term, const Terminal& terminal) {
       programs(terminal.name);
       return;
     }
-    const auto root = _image.nodes[bare(body)];
+    const auto root = _image.nodes[_image.bare(body)];
     const bool openRun = root.kind == ImageKind::repeat && root.n == kUnboundedCount &&
                          (_image.nodes[_image.children[root.first]].kind == ImageKind::seq ||
                           _image.nodes[_image.children[root.first]].kind == ImageKind::choice);
@@ -643,23 +643,6 @@ bool LexAutomatonBuilder::add_body(std::uint16_t term, ImageId body, bool tail) 
       // lexer's, which waits for no condition: it is read as a condition too.
       if (!tail || !_tested) return false;
       tail = false;
-    }
-  }
-}
-
-ImageId LexAutomatonBuilder::bare(ImageId id) const {
-  // A chain of more terminals than the grammar has turns back on itself: the
-  // call stays, for the compile to refuse.
-  for (std::size_t calls = 0;; ++calls) {
-    const ImageNode& n = _image.nodes[id];
-    if (calls > _image.rules.size()) return id;
-    if (n.kind == ImageKind::doc) {
-      id = _image.children[n.first];
-    } else if (n.kind == ImageKind::ref &&
-               _image.stage(n.a).kind == ImageRuleKind::terminal) {
-      id = _image.node(*_image.stage(n.a).body, _image.folds(n.a));
-    } else {
-      return id;
     }
   }
 }
@@ -978,7 +961,7 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::lead(ImageId id,
       if (!_inlined[n.a]) {
         _inlined[n.a] = true;
         _inlining.push_back(n.a);
-        const Frag f = co_await lead(_image.node(*stage.body, _image.folds(n.a)), stops);
+        const Frag f = co_await lead(_image.bare(id), stops);
         _inlining.pop_back();
         _inlined[n.a] = false;
         co_return f;
@@ -1062,7 +1045,7 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::compile(
       // Read alone, a mark is what it reads; the matcher notes where it began
       // and ended.
       if (!_matching) co_return co_await compile(_image.children[n.first], tail);
-      const std::uint32_t marked = tag(n.text);
+      const std::uint32_t marked = tag(n.text2);
       const Frag body = co_await compile(_image.children[n.first], false);
       const Frag f{state(), state()};
       exit(f.in, MatchAction::open, marked, body.in);
@@ -1080,7 +1063,7 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::compile(
     case ImageKind::same: {
       if (!_matching) throw NotRegular{"an echo of a mark"};
       const Frag f{state(), state()};
-      exit(f.in, MatchAction::echo, tag(n.text), f.out);
+      exit(f.in, MatchAction::echo, tag(n.text2), f.out);
       co_return f;
     }
     case ImageKind::eof: {
@@ -1124,7 +1107,7 @@ detail::Descent<LexAutomatonBuilder::Frag> LexAutomatonBuilder::compile(
       if (_inlined[n.a]) throw NotRegular{"a terminal that reads itself"};
       _inlined[n.a] = true;
       _inlining.push_back(n.a);
-      const Frag f = co_await compile(body, tail);
+      const Frag f = co_await compile(_image.bare(id), tail);
       _inlining.pop_back();
       _inlined[n.a] = false;
       co_return f;
@@ -1326,7 +1309,7 @@ void LexAutomatonBuilder::closers(ImageId close, std::vector<Closer>& out,
   while (!todo.empty()) {
     const auto [id, consumed] = todo.back();
     todo.pop_back();
-    const ImageId at = bare(id);
+    const ImageId at = _image.bare(id);
     if (!seen.emplace(at, consumed).second) continue;
     const ImageNode& n = _image.nodes[at];
     switch (n.kind) {

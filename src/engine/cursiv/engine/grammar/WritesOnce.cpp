@@ -68,12 +68,12 @@ class Check {
     schedule(_image.entry_rule(_image.rule(*desc.entry)));
   }
 
-  // A rule is read again when a rule it calls is found to write more into the
-  // node it hands over.
+  // A rule waits under the rules it meets first, and is read again when one it
+  // calls is found to write more into the node it hands over.
   void run() {
     while (!_todo.empty()) {
       _rule = _todo.back();
-      _todo.pop_back();
+      const std::size_t waiting = _todo.size();
       const ImageStageDesc& stage = _image.stage(_rule);
       Members wrote;
       switch (stage.kind) {
@@ -89,13 +89,13 @@ class Check {
           Members operands;
           for (const void* row : {stage.leftRow, stage.rightRow})
             if (const auto m = member(row); m != none && !operands.insert(m)) refuse(m, "twice");
-          wrote.merge(operands);
           for (std::uint32_t l = 0; l < stage.levelCount; ++l) {
-            // A prefix or postfix level builds its own node: its operand
-            // member, then its operator's.
+            // A binary level writes both operands; a prefix or postfix level
+            // builds its own node: its operand member, then its operator's.
             const Association group = stage.levels[l].group;
             const bool unary = group == Association::Prefix || group == Association::Postfix;
             const unsigned operand = member(stage.levels[l].operandRow);
+            if (!unary) wrote.merge(operands);
             if (operand != none) wrote.insert(operand);
             for (std::uint32_t o = 0; o < stage.levels[l].count; ++o)
               if (const auto m = member(stage.levels[l].ops[o].row); m != none) {
@@ -109,6 +109,8 @@ class Check {
           break;
       }
       slot(_seen, _rule) = true;
+      if (_todo.size() != waiting) continue;
+      _todo.pop_back();
       _queued[_rule] = false;
       Members& known = slot(_made, _rule);
       if (!known.merge(wrote)) continue;

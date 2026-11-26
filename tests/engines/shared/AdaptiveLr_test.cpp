@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -153,6 +156,38 @@ void an_unbounded_condition_is_read_by_one_matcher_thread() {
                             [](const auto& e) { return e.action == MatchAction::end; }));
 }
 
+// A chain of terminals, each reading the one before, and a terminal that
+// reads any of them: each call is followed to the literal once, so the lexer
+// is built in time linear in the chain, well within the bound.
+void a_chain_of_terminal_calls_is_followed_once() {
+  constexpr std::size_t kLinks = 8000;
+  const ImageDesc letter{.kind = ImageKind::lit, .text = "a"};
+  std::vector<ImageStageDesc> stages(kLinks);
+  std::vector<ImageRuleDesc> rules(kLinks);
+  std::vector<ImageDesc> calls(kLinks);
+  std::vector<const ImageDesc*> arms(kLinks);
+  for (std::size_t k = 0; k < kLinks; ++k) {
+    stages[k].body = k == 0 ? &letter : &calls[k - 1];
+    rules[k] = {.name = "Link", .stage = &stages[k]};
+    calls[k] = {.kind = ImageKind::ref, .rule = &rules[k]};
+    arms[k] = &calls[k];
+  }
+  const ImageDesc any{.kind = ImageKind::choice, .count = kLinks, .children = arms.data()};
+  const auto start = std::chrono::steady_clock::now();
+  GrammarImage image;
+  Terminal terminal;
+  terminal.name = "Any";
+  terminal.body = image.node(any);
+  LexAutomatonBuilder lexer(image);
+  lexer.add(1, terminal);
+  (void)lexer.build(2);
+  const auto spent = std::chrono::steady_clock::now() - start;
+  if (spent >= std::chrono::seconds(1))
+    std::printf("a chain of %zu terminal calls took %lld ms\n", kLinks,
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(spent).count()));
+  CHECK(spent < std::chrono::seconds(1));
+}
+
 struct NamedClosers : cursiv::GrammarSpec {
   struct Close : terminal<lit<"*/">> {};
   struct Again : terminal<lit<"*/"> | ref<Again>> {};
@@ -205,6 +240,35 @@ void rejects_second_write(std::string_view message) {
   } catch (const Refused& error) {
     CHECK(std::string_view(error.what()).find(message) != std::string_view::npos);
   }
+}
+
+// A chain of rules, each taking over the node of the one before and writing a
+// member of its own into it, is checked in time linear in its length.
+bool a_chain_of_rules_is_checked_once_each() {
+  constexpr std::size_t n = 3000;
+  std::vector<cursiv::engine::MemberDesc> members(n);
+  std::vector<cursiv::engine::RowDesc> rows(n);
+  std::vector<const cursiv::engine::RowDesc*> rowList;
+  std::vector<ImageDesc> refs(n), flags(n), seqs(n);
+  std::vector<std::array<const ImageDesc*, 2>> parts(n);
+  std::vector<ImageStageDesc> stages(n);
+  std::vector<ImageRuleDesc> rules(n);
+  const ImageDesc word{.kind = ImageKind::lit};
+  const ImageDesc* const words[] = {&word};
+  for (std::size_t i = 0; i < n; ++i) {
+    rows[i].member = &members[i];
+    rowList.push_back(&rows[i]);
+    flags[i] = {.kind = ImageKind::flag, .count = 1, .children = words, .row = &rows[i]};
+    if (i > 0) refs[i] = {.kind = ImageKind::ref, .rule = &rules[i - 1]};
+    parts[i] = {&refs[i], &flags[i]};
+    seqs[i] = {.kind = ImageKind::seq, .count = 2, .children = parts[i].data()};
+    stages[i] = {.kind = ImageRuleKind::node, .body = &seqs[i]};
+    rules[i].stage = &stages[i];
+  }
+  GrammarImage image;
+  const auto start = std::chrono::steady_clock::now();
+  check_writes_once(image, {rowList, &rules[n - 1]});
+  return std::chrono::steady_clock::now() - start < std::chrono::seconds(1);
 }
 
 template <auto Word>
@@ -476,6 +540,7 @@ int main() {
   long_unit_chains_share_blocks_and_read_in_order();
   const auto chains = plain_tables<UnitChains>();
   CHECK(chains.hops.size() == 7);  // Empty chain, two outer rules, four base alternatives.
+  CHECK(chains.corners.empty());   // No kept state completes a link of the chain.
   using M = SharedMarks;
   constexpr auto first = M::markTag + M::first;
   constexpr auto second = M::markTag + M::second;
@@ -486,6 +551,7 @@ int main() {
   overlapping_runs_keep_their_own_matcher_entry(false);
   overlapping_runs_keep_their_own_matcher_entry(true);
   an_unbounded_condition_is_read_by_one_matcher_thread();
+  a_chain_of_terminal_calls_is_followed_once();
   using N = NamedClosers;
   // A closer behind a doc or a terminal's name is read as its literal is.
   CHECK(closing_table<N::lit<"*/">.doc<"Ends the comment.">()>() ==
@@ -496,6 +562,7 @@ int main() {
   rejects_second_write<UnorderedWrites>("'marked' twice");
   rejects_second_write<AliasedOperands>("'child' twice");
   rejects_second_write<SectionWrites>("'marked' twice");
+  CHECK(a_chain_of_rules_is_checked_once_each());
   using G = cursiv::GrammarSpec;
   CHECK(!embedded_word_overlaps_close<G::lit<"z">>());
   CHECK(embedded_word_overlaps_close<G::lit<"énd!word">>());

@@ -480,8 +480,8 @@ class Stand : private Machine::CaretTests {
     if (site.trivia.end) {
       const auto prefix = _cut - site.trivia.begin;
       const auto edited = splice(site.trivia.begin, word);
-      if (site.trivia.end == _before.text().data() + _cut) return read(edited, site.mode).length == prefix;
-      return !t.word_width(word.data(), word.data() + word.size()) ||
+      return (site.trivia.end != _before.text().data() + _cut &&
+              !t.word_width(word.data(), word.data() + word.size())) ||
              trivia_at(edited, 0, prefix, site.mode).end == edited.data() + prefix;
     }
     if (_held == _cut) return true;
@@ -533,15 +533,13 @@ class Stand : private Machine::CaretTests {
     auto& sample = _samples[letters];
     if (!sample) sample = samples(t, letters);
     const LexBlocks win = t.modes[mode].win;
-    // On the second pass, keep paths that extend the preceding token differently.
-    // Its last acceptance still distinguishes paths once that lexer stops.
+    // Keep paths that extend the text before the caret differently in any mode,
+    // its token's mode telling the last acceptance. Where that mode alone reads the
+    // token again, a plain token of it that runs into the spelling ends the path.
     const TextOffset from = site.trivia.end ? site.trivia.begin : _held;
     std::uint16_t left = 0, leftMode = mode;
-    const auto continues = [&](std::uint16_t state) {
-      const auto* onward = t.modes[leftMode].onward;
-      return (onward[state >> 3] >> (state & 7)) & 1;
-    };
-    if (!letters && from < _cut) {
+    bool alone = false;
+    if (from < _cut) {
       auto [at, fresh] = _leftAt.try_emplace(from, 1);
       if (fresh) {
         const auto text = _before.text();
@@ -551,9 +549,16 @@ class Stand : private Machine::CaretTests {
         }
       }
       left = at->second;
-      if (!site.trivia.end)
-        leftMode = _loose ? t.modeFault[mode] : t.stateMode[_stacks.state(_readers[root.held].node)];
-      if (leftMode == kNoToken || !continues(left)) left = 0;
+      if (!site.trivia.end && _loose) {
+        leftMode = t.modeFault[mode];
+        alone = true;
+      } else if (!site.trivia.end) {
+        const Holder& held = _readers[root.held];
+        leftMode = t.stateMode[_stacks.state(held.node)];
+        alone = !t.retries[_stacks.state(held.node)] && held.terminal != t.indentTerminal &&
+                held.terminal != t.dedentTerminal;
+      }
+      if (leftMode == kNoToken) left = 0;
     }
     for (const auto& entry : _queue) _reached[entry.state] = 0;
     if (_reached.size() < 2) _reached.resize(2);
@@ -612,8 +617,8 @@ class Stand : private Machine::CaretTests {
         if (const auto side = static_cast<std::uint16_t>(context)) {
           const auto state = t.transition(side, c);
           const auto accept = t.modes[leftMode].win.at(0, t.lexStates[state].accept);
-          after = accept == kWinNone ? context & 0xFFFF0000u : std::uint32_t{accept} << 16;
-          if (state && continues(state)) after |= state;
+          if (alone && accept < kWinNone) continue;
+          after = (accept == kWinNone ? context & 0xFFFF0000u : std::uint32_t{accept} << 16) | state;
         }
         if (to >= _reached.size()) _reached.resize(to + 1);
         const auto first = _reached[to];

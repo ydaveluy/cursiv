@@ -167,9 +167,11 @@ void run() {
   const Reader inLast{*lr, "inlast:"};
   const Reader reach{*lr, "reach:"};
   const Reader inReach{*lr, "inreach:"};
+  const Reader inReachRule{*lr, "inreachrule:"};
   for (const std::string_view text : {"a", "a b", "a b c", "ab cd", " a b "}) {
     same(last, inLast, text);
     same(reach, inReach, text);
+    same(reach, inReachRule, text);
   }
   CHECK(alone(last, "a b") == "a,b!,");
   CHECK(alone(reach, "a b") == "a,b,");

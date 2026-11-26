@@ -377,20 +377,20 @@ enum : unsigned {
 struct KernelCost {
   static constexpr std::uint16_t kAccept = 0xFFFF;
   static constexpr std::uint16_t kNone = 0xFFFF;
-  static constexpr std::uint16_t kNever = 0xFFF;
+  static constexpr std::uint16_t kNever = 0x1FF;
   std::uint16_t lhs;
   std::uint16_t symbol;
-  std::uint8_t dot;
+  std::uint16_t dot;
   std::uint16_t rest;
   std::uint16_t after;
   [[nodiscard]] static constexpr KernelCost of(std::uint64_t v) {
     return {static_cast<std::uint16_t>(v), static_cast<std::uint16_t>(v >> 16),
-            static_cast<std::uint8_t>(v >> 32), static_cast<std::uint16_t>((v >> 40) & 0xFFF),
-            static_cast<std::uint16_t>(v >> 52)};
+            static_cast<std::uint16_t>((v >> 32) & 0x1FFF), static_cast<std::uint16_t>((v >> 45) & kNever),
+            static_cast<std::uint16_t>((v >> 54) & kNever)};
   }
   [[nodiscard]] constexpr std::uint64_t packed() const {
     return std::uint64_t{lhs} | std::uint64_t{symbol} << 16 | std::uint64_t{dot} << 32 |
-           std::uint64_t{rest} << 40 | std::uint64_t{after} << 52;
+           std::uint64_t{rest} << 45 | std::uint64_t{after} << 54;
   }
 };
 
@@ -511,10 +511,10 @@ struct Tables {
   // Per state, the keyword it acts on where it acts on nothing else and the
   // keyword is spelled as a word; `kNoToken` for none.
   const std::uint16_t* forced = nullptr;
-  // Per state, its kernel's list of items as `KernelCost`s; per nonterminal,
-  // the nonterminals its derivations begin with, ascending, each with the
-  // fewest tokens past it (`nonterminal | tokens << 16`): what the fewest
-  // tokens that complete a stack are read from.
+  // Per state, its kernel's list of items as `KernelCost`s; per nonterminal a
+  // kernel item reads, those its derivations begin with that one completes,
+  // ascending, with the fewest tokens past it (`nonterminal | tokens << 16`):
+  // what the fewest tokens that complete a stack are read from.
   const std::uint16_t* kernelOf = nullptr;
   const std::uint32_t* kernelAt = nullptr;
   const std::uint64_t* kernels = nullptr;

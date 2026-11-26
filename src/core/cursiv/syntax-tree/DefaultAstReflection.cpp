@@ -77,7 +77,8 @@ std::uint16_t DefaultAstReflection::referenceIndexOf(
   const std::uint16_t owner = typeIndexOf(container);
   if (owner == kNoType || property.empty() || _f.referenceBound == 0)
     return kNoReference;
-  // Inherited reference fields are already included, in declaration order.
+  // The row holds the references the class's member names find, inherited ones
+  // included unless a member of the same name hides them.
   for (const auto f : _f.referenceRows[owner])
     if (_f.fields[f].name == property) return f;
   return kNoReference;

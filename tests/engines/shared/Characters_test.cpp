@@ -394,6 +394,14 @@ void gaps(const cursiv::Parser& p, std::string_view prefix = {}) {
       false);
   holds("isn a b", true);
   holds("isn a  b", false);
+  // An invalid byte is a character of its own, told by the byte after it: a
+  // gap holds it, and is it only where nothing follows it.
+  holds(
+      "isn a\xC2"
+      "b",
+      true);
+  holds("isn a\xC2 b", false);
+  holds("hlead a\xC2 b", true);
   // A pattern that holds a character is read from that character, whatever a
   // shorter one spells inside it.
   holds(

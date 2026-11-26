@@ -833,6 +833,13 @@ void a_prefix_reads_before_the_primary(const cursiv::Parser& p) {
   check(p, "signs:", "- -a", "(-(-a))");
 }
 
+// A rule writes the left operand that a table of a prefix level alone leaves.
+void a_prefix_table_leaves_its_left_operand(const cursiv::Parser& p) {
+  const auto parsed = p.parse("adopted:-x<y");
+  const auto* const v = cursiv::ast_cast<ast::Binary>(value(parsed));
+  CHECK(v != nullptr && v->op == "-" && v->right != nullptr && v->left != nullptr);
+}
+
 // A postfix ends any operand, whatever binds on its right: its own level
 // only tells how far back its operand reads.
 void a_postfix_ends_any_operand(const cursiv::Parser& p) {
@@ -993,20 +1000,22 @@ void a_line_ends_what_its_operators_leave(const cursiv::Parser& p) {
       {"a < b -\nc", "(a < (b - c))"},
       {"a < b\n* c", "<refused>"},
   };
-  for (const auto& sample : cases) {
-    const std::string source = "gapped:" + std::string(sample.text);
-    const cursiv::ParseResult r = p.parse(source);
-    const auto* const lines = r.valueAs<ast::Lines>();
-    std::string got = "<refused>";
-    if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() && lines != nullptr) {
-      got.clear();
-      for (const ast::Expr* const item : lines->items) {
-        if (!got.empty()) got += " ; ";
-        spell(*item, got);
+  // The guard written in the operator's rule, or in a rule that one calls.
+  for (const char* const section : {"gapped:", "factored:"})
+    for (const auto& sample : cases) {
+      const std::string source = std::string(section) + std::string(sample.text);
+      const cursiv::ParseResult r = p.parse(source);
+      const auto* const lines = r.valueAs<ast::Lines>();
+      std::string got = "<refused>";
+      if (r.accepted && r.diagnostics.empty() && !r.cst().recovered() && lines != nullptr) {
+        got.clear();
+        for (const ast::Expr* const item : lines->items) {
+          if (!got.empty()) got += " ; ";
+          spell(*item, got);
+        }
       }
+      same_text(section, sample.text, got, sample.expected);
     }
-    same_text("Lr", sample.text, got, sample.expected);
-  }
 }
 
 // An operator two gap tests guard leaves its left operand to the looser
@@ -1054,6 +1063,12 @@ void a_block_brings_line_ends_back(const cursiv::Parser& p) {
       {"lines:", "a /* c\n */\nb", "a ; b"},
       {"lines:", "a /* c */ .b", "(a . b)"},
       {"lines:", "a /* c\n */ .b", "(a . b)"},
+      {"glued:", "a\nbc", "a ; c"},
+      {"glued:", "a/*\n*/b", "<refused>"},
+      // Where both arms read the text, the first is taken.
+      {"told:", "x c", "{} ; x ; c"},
+      {"told:", "x\nc", "[] ; x ; c"},
+      {"told:", "x /*\n*/ c", "[] ; x ; c"},
       {"gapped:", "[a\n- b]", "[(a - b)]"},
       {"gapped:", "[a\n< b]\n-c", "[(a < b)] ; (-c)"},
       {"gapped:", "{a\n-b\n}", "{a ; (-b)}"},
@@ -1120,6 +1135,7 @@ void exercise(const cursiv::Parser& p) {
   a_prefix_begins_any_operand(p);
   a_postfix_ends_any_operand(p);
   a_prefix_reads_before_the_primary(p);
+  a_prefix_table_leaves_its_left_operand(p);
   what_a_level_refuses(p);
   a_level_builds_its_own_class(p);
   a_cyclic_table_reads_its_levels(p);

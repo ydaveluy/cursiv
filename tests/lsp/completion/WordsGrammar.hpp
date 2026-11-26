@@ -15,6 +15,10 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   string_view size;
   reference<Item> target;
 };
+// Its own text `target` hides the inherited reference.
+struct Named : cursiv::Extends<Item> {
+  string_view target;
+};
 struct Items : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
 };
@@ -64,11 +68,27 @@ struct Suite : cursiv::GrammarSpec {
   // A reference first in its rule: the caret enters the rule to write it.
   struct NewItem : rule<create<ast::Item>(assign<&ast::Item::target>(ref<ID>) +
                                           lit<";">)> {};
+  // A dot and eight letters or more as one token, which only a condition reads.
+  struct DOTTED : terminal<lit<"."> + repeat<8, 8>(cr<"a-zA-Z">) + many(w)> {};
+  // A run of `y`, and a count of them that the run reads on into.
+  struct RUN : terminal<some(lit<"y">)> {};
+  struct COUNT : terminal<repeat<1, 32>(repeat<1, 32>(lit<"y">))> {};
   struct Root
       : rule<create<ast::Items>(
             (lit<"path:"> + many(append<&ast::Items::items>(ref<PathItem>))) |
             (lit<"cap:"> + many(append<&ast::Items::items>(ref<CapItem>))) |
             (lit<"new:"> + many(append<&ast::Items::items>(ref<NewItem>))) |
+            // A condition reads the name with the dot before it.
+            (lit<"dotted:"> + append<&ast::Items::items>(create<ast::Item>(
+                (&(lit<"-"> + ref<DOTTED>) + lit<"-"> + lit<"."> +
+                 assign<&ast::Item::name>(ref<ID>)) |
+                (lit<"-"> + lit<"."> + lit<";">)))) |
+            (lit<"chain:"> + ref<RUN> + option(ref<COUNT>)) |
+            (lit<"hide:"> + append<&ast::Items::items>(create<ast::Named>(
+                assign<&ast::Item::target>(ref<ID>) + lit<":"> +
+                assign<&ast::Named::target>(kw<"done">)))) |
+            // A space followed by `a` is a token there.
+            (lit<"spaced:"> + ((lit<" ", &lit<"a">> + lit<"b">) | (lit<"a"> + lit<";">))) |
             (lit<"masked:"> + append<&ast::Items::items>(ref<MaskedSizeItem>)) |
             (lit<"case:"> + append<&ast::Items::items>(create<ast::Item>(
                 (assign<&ast::Item::name>(ref<STATUS>) + lit<":">) | lit<"active:">))) |

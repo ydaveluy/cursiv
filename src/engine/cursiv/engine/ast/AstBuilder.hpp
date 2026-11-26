@@ -176,7 +176,7 @@ class AstBuilder {
   [[nodiscard]] bool parts(NodeId id, std::span<const std::string_view>& out);
   // Texts as one: a view of the source where they all touch, else text the
   // tree keeps.
-  [[nodiscard]] std::string_view join(std::span<const std::string_view> parts) const;
+  [[nodiscard]] std::string_view join(std::span<const std::string_view> parts);
   // The text record `id` denotes: its parts joined, through its own
   // conversions. A language that converts no text on the way reads a token
   // here.
@@ -224,13 +224,15 @@ class AstBuilder {
   [[nodiscard]] bool converted(NodeId id, std::string_view& out);
 
   // A record whose parts are being gathered: how many records under it are
-  // still to read, the last first, and where its parts begin.
+  // still to read, the last first, where its parts begin, and the largest
+  // part the tree keeps, which their join grows in place.
   struct Gathering {
     NodeId record;
     NodeId begin;
     NodeCount left;
     bool grouped;
     std::size_t base;
+    ParseResultBuilder::Joined kept{};
   };
 
   struct Reading;

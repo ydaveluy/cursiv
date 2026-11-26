@@ -172,9 +172,13 @@ bool AstBuilder::parts(NodeId id, std::span<const std::string_view>& out) {
       } else {
         text = join(own);
       }
+      const auto kept = at.kept;
       _gathering.pop_back();
       _parts.resize(base);
       _parts.push_back(text);
+      if (auto& largest = _gathering.back().kept; kept.text.data() == text.data() &&
+          kept.text.size() == text.size() && text.size() > largest.text.size())
+        largest = kept;
       continue;
     }
     const NodeId record = at.begin + at.left - 1;
@@ -203,7 +207,7 @@ bool AstBuilder::parts(NodeId id, std::span<const std::string_view>& out) {
   return true;
 }
 
-std::string_view AstBuilder::join(std::span<const std::string_view> parts) const {
+std::string_view AstBuilder::join(std::span<const std::string_view> parts) {
   if (parts.empty()) return {};
   while (!parts.empty() && parts.front().empty()) parts = parts.subspan(1);
   if (parts.empty()) return "";
@@ -212,11 +216,12 @@ std::string_view AstBuilder::join(std::span<const std::string_view> parts) const
   const auto source = cst.text();
   const char* first = parts.front().data();
   const char* end = source.data() + source.size();
-  if (std::less{}(first, source.data()) || !std::less{}(first, end)) return out.keepText(parts);
+  auto* const last = &_gathering.back().kept;
+  if (std::less{}(first, source.data()) || !std::less{}(first, end)) return out.keepText(parts, last);
   auto tail = source.substr(static_cast<std::size_t>(first - source.data()));
   for (const auto part : parts) {
     if (part.empty()) continue;
-    if (part.data() != tail.data() || part.size() > tail.size()) return out.keepText(parts);
+    if (part.data() != tail.data() || part.size() > tail.size()) return out.keepText(parts, last);
     tail.remove_prefix(part.size());
   }
   return {first, static_cast<std::size_t>(tail.data() - first)};

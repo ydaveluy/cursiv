@@ -32,7 +32,8 @@ namespace cursiv::engine {
 template <class Result, class Sink>
 CURSIV_ALWAYS_INLINE inline bool take_result(AstBuilder& b, NodeId at, Result&& result,
                                              Sink&& sink) {
-  if constexpr (requires { result.value.has_value(); result.error.message; }) {
+  using Value = cursiv::detail::unwrap_result_t<Result>;
+  if constexpr (!std::is_same_v<Value, std::remove_cvref_t<Result>>) {
     if (result) {
       sink(std::move(*result.value));
     } else {
@@ -192,12 +193,14 @@ CURSIV_ALWAYS_INLINE inline void read_value(AstBuilder& b, NodeId at, Sink&& sin
     else
       return detail::is_data_rule<R>;
   }();
+  // A member of views takes text as it stands: the source's, or what the tree keeps.
+  constexpr bool view = std::is_same_v<typename detail::strip_storage<H>::type, std::string_view>;
   if constexpr (!data) {
     const std::string_view text = b.cst.text(at);
-    // A token holds some text: one with none is a repair's.
-    if (text.empty()) [[unlikely]] return;
+    // A token a repair invented gives no value.
+    if (text.empty() && b.cst[at].isRecovered()) [[unlikely]] return;
     if constexpr (std::is_void_v<Cv>) {
-      if constexpr (std::is_same_v<H, std::string_view>)
+      if constexpr (view)
         sink(text);
       else
         take_result(b, at, default_value<H>(b, at, text), sink);
@@ -211,10 +214,13 @@ CURSIV_ALWAYS_INLINE inline void read_value(AstBuilder& b, NodeId at, Sink&& sin
   } else {
     std::string_view text;
     if (!b.denoted(at, text)) return;
-    if constexpr (std::is_void_v<Cv> && !std::is_same_v<H, std::string_view>)
-      take_result(b, at, default_value<H>(b, at, text), sink);
-    else
+    // Converted text is a value of the rule's type.
+    if constexpr (view)
       sink(text);
+    else if constexpr (detail::text_value<R>::converted)
+      sink(detail::rule_type_t<R>(text));
+    else
+      take_result(b, at, default_value<H>(b, at, text), sink);
   }
 }
 

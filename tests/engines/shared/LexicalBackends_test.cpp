@@ -265,6 +265,7 @@ void exercise(const cursiv::Parser& parser) {
         "inline:##|(==:==)|==!", "nested:##|(=:(==::==):=)|##!",
         "probe:<==:==>", "echo:aa", "echo:\xE9\xE9", "echo:\xE2\xE2",
         "line:ab\nab", "line:\xE9\n\xE9", "line:\xC3\n\xC3",
+        "namesakes:abab", "slots:abab",
         R"(raw:#"text"#)", R"(raw:##"a\##"b"##)",
         R"(raw:##"a\##(#"inner"#)b"##)",
         R"(raw:#"a\#(##"inner\##"quote"##)b"#)"})
@@ -276,13 +277,14 @@ void exercise(const cursiv::Parser& parser) {
         "helper:##|(==:==)|==!", "recursive:##|(==:==)|==!",
         "inline:##|(==:==)|##!", "nested:##|(=:(==::=):=)|##!", "probe:<==:=>",
         "echo:ab", "echo:\xE9" "a", "echo:\xE9", "echo:\xE2",
-        "line:\xE9\nx", "line:\xE9",
+        "line:\xE9\nx", "line:\xE9", "namesakes:abbb", "slots:abbb",
         R"(raw:##"a\##"b"#)"})
     check(parser, source, false);
   const std::string plain = "raw:##\"" + std::string(100000, 'x') + "\"##";
   check(parser, plain, true);
   const std::string hashes = "raw:##\"" + std::string(8192, '#') + "\"##";
   check(parser, hashes, true);
+  check(parser, "line:" + std::string(1 << 20, 'x'), false);
 }
 }  // namespace
 
@@ -350,6 +352,26 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, "same:", "==:body==");
   check(parser, "same:", "=:body=");
   check(parser, "same:", "==:body=", false);
+  // The token ends at the first repeat of its mark, marks and bodies drawn
+  // from two bytes.
+  std::uint32_t seed = 1;
+  const auto draw = [&](std::uint32_t n) {
+    seed = seed * 1103515245u + 12345u;
+    return (seed >> 16) % n;
+  };
+  for (int round = 0; round < 2000; ++round) {
+    std::string mark(1 + draw(6), '='), body(draw(24), '=');
+    for (std::string* text : {&mark, &body})
+      for (char& c : *text) c = draw(2) != 0 ? 'x' : '=';
+    check(parser, "same:", mark + ":" + body + mark, (body + mark).find(mark) == body.size());
+  }
+  // The body repeats all but the last byte of a 2 MiB mark: each place reads
+  // again only the bytes no place before it read.
+  const std::string capture(std::size_t{1} << 21, '=');
+  const auto begin = std::chrono::steady_clock::now();
+  check(parser, "same:", capture + ":" + capture.substr(1) + "x" + capture);
+  std::printf("  2 MiB mark repeated but its last byte: %.3fs\n",
+              std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count());
   check(parser, "empty:", ":");
   check(parser, "empty:", "#:body#");
   check(parser, "empty:", ":body", false);

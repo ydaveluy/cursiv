@@ -99,6 +99,14 @@ namespace tcaptures {
 struct A {};
 struct B {};
 struct Hashes {};
+namespace one {
+struct Tag {};
+}
+namespace two {
+struct Tag {};
+}
+template <int>
+struct Slot {};
 
 struct Base : cursiv::GrammarSpec {
   struct Branch : terminal<((mark<A>(some(lit<"#">)) + lit<":">) |
@@ -163,6 +171,11 @@ struct Base : cursiv::GrammarSpec {
   // The mark may begin on a byte that is not yet a whole character.
   struct Echo : terminal<mark<A>(any) + same<A>> {};
   struct Line : terminal<through(mark<A>(some(cr<"^\n">)), lit<"\n"> + same<A>)> {};
+  // Tags that share a short name are still two tags.
+  struct Namesakes : terminal<mark<one::Tag>(any) + mark<two::Tag>(any) + same<one::Tag> +
+                              same<two::Tag>> {};
+  struct Slots : terminal<mark<Slot<1>>(any) + mark<Slot<2>>(any) + same<Slot<1>> +
+                          same<Slot<2>>> {};
 
   struct Root
       : rule<create<Node>(
@@ -180,6 +193,8 @@ struct Base : cursiv::GrammarSpec {
             (lit<"probe:"> + &ref<Probe> + assign<&Node::text>(ref<Angle>)) |
             (lit<"echo:"> + assign<&Node::text>(ref<Echo>)) |
             (lit<"line:"> + assign<&Node::text>(ref<Line>)) |
+            (lit<"namesakes:"> + assign<&Node::text>(ref<Namesakes>)) |
+            (lit<"slots:"> + assign<&Node::text>(ref<Slots>)) |
             (lit<"raw:"> + assign<&Node::text>(ref<Raw>)))> {};
   using entry = Root;
 };
@@ -210,7 +225,7 @@ struct Base : cursiv::GrammarSpec {
   struct ExplicitHeredoc : terminal<Open + many(!Close + any) + Close> {};
   struct Padding : terminal<through(Open, lit<"\n"> + repeat<0, 4>(cr<" \t">) +
                                               same<Label>)> {};
-  struct SameOnly : terminal<through(mark<Equals>(some(cr<"=">)) + lit<":">,
+  struct SameOnly : terminal<through(mark<Equals>(some(cr<"=x">)) + lit<":">,
                                      same<Equals>)> {};
   struct EmptySame
       : terminal<through(mark<Label>(many(cr<"#">)) + lit<":">, same<Label>)> {

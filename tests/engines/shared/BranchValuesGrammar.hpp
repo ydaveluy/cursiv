@@ -3,17 +3,25 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
 
 #include "cursiv/grammar/GrammarSpec.hpp"
+#include "cursiv/syntax-tree/ParseDiagnostic.hpp"
 #include "cursiv/syntax-tree/AstNode.hpp"
 
 namespace tbranch {
 
 namespace ast {
 enum class Size { none, small, large };
+// A value of the user's that holds a `value` and an `error`, as a conversion
+// result does, and is no conversion result.
+struct Reading {
+  std::optional<std::int32_t> value;
+  cursiv::ParseDiagnostic error;
+};
 // A name, or two links joined.
 struct Link : cursiv::Extends<cursiv::AstNode> {
   Link* left = nullptr;
@@ -28,6 +36,7 @@ struct Item : cursiv::Extends<cursiv::AstNode> {
   Size size = Size::none;
   int32 count = 0;
   Link* link = nullptr;
+  Reading reading;
 };
 struct Items : cursiv::Extends<cursiv::AstNode> {
   vector<Item*> items;
@@ -44,6 +53,9 @@ inline constexpr auto count_parts = [](std::span<const std::string_view> p) {
 };
 inline constexpr auto text_length = [](std::string_view t) {
   return static_cast<std::int32_t>(t.size());
+};
+inline constexpr auto read_parts = [](std::span<const std::string_view> p) {
+  return ast::Reading{static_cast<std::int32_t>(p.size()), {}};
 };
 
 struct Suite : cursiv::GrammarSpec {
@@ -95,7 +107,8 @@ struct Suite : cursiv::GrammarSpec {
             ((lit<"#"> +
               assign<&ast::Item::count>(as<count_parts>(some(ref<ID>)) |
                                         as<std::int32_t>(ref<NUM>))) |
-             (lit<"%"> + assign<&ast::Item::count>(ref<Measure>))) +
+             (lit<"%"> + assign<&ast::Item::count>(ref<Measure>)) |
+             (lit<"@"> + assign<&ast::Item::reading>(as<read_parts>(some(ref<ID>))))) +
             lit<";">)> {};
   // A choice of values behind a condition adds a record of its own where a
   // repair leaves a token beside the value, and passes on the value it read.

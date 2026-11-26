@@ -1,6 +1,7 @@
 #include <lsp/types.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -648,6 +649,53 @@ void a_word_terminal_offers_its_property_if_any_spelling_fits() {
   } catch (const cursiv::OperationCancelled&) {}
 }
 
+// A condition that reads the name with the dot before it asks for more
+// letters than the spellings the lexer tells apart from the caret on.
+void a_condition_may_ask_for_a_longer_spelling() {
+  const auto parser = twords::generated::Suite::createParser();
+  const auto whole = parser->parse("dotted:-.abcdefgh");
+  CHECK(whole.accepted && whole.diagnostics.empty());
+  const auto parsed = parser->parse("dotted:-.");
+  std::vector<cursiv::NextFeature> features;
+  parser->nextFeaturesAt(parsed.cst(), 9, 9, features);
+  CHECK(std::ranges::any_of(features, [](const auto& f) { return f.property == "name"; }));
+}
+
+// The trivia before the caret stays trivia once the candidate is written: a
+// space that `a` would make a token refuses it, a line end does not.
+void a_candidate_keeps_the_trivia_before_it() {
+  const World world;
+  using Labels = std::vector<std::string>;
+  CHECK(labels_at(*world.lr, "spaced:\n<|>") == Labels{"a"});
+  CHECK(labels_at(*world.lr, "spaced: <|>").empty());
+}
+
+// The run before the caret reads on into every count after it: the search
+// ends at the first byte instead of spelling each count.
+void a_token_that_reads_on_into_the_spelling_ends_the_search() {
+  const auto parser = twords::generated::Suite::createParser();
+  const auto fastest = [&](std::string_view text) {
+    const auto parsed = parser->parse(text);
+    auto best = std::chrono::steady_clock::duration::max();
+    for (int i = 0; i < 5; ++i) {
+      std::vector<cursiv::NextFeature> features;
+      const auto begin = std::chrono::steady_clock::now();
+      parser->nextFeaturesAt(parsed.cst(), 7, 7, features);
+      best = std::min(best, std::chrono::steady_clock::now() - begin);
+    }
+    return best;
+  };
+  CHECK(fastest("chain:y") < 50 * fastest("chain: "));
+}
+
+// A member hides an inherited one of its name: the text `target` of `Named`
+// is no reference, so its keyword is offered.
+void a_member_hides_an_inherited_one_of_its_name() {
+  const World world;
+  using Labels = std::vector<std::string>;
+  CHECK(labels_at(*world.lr, "hide:foo:d<|>one") == Labels{"done"});
+}
+
 void the_replaced_token_is_a_spelling_only_over_its_whole_span() {
   const auto parser = twords::generated::Suite::createParser();
   const auto parsed = parser->parse("case:ACTIVE:");
@@ -713,6 +761,10 @@ void run() {
   a_data_rule_of_one_token_is_read_whole();
   the_hooks_shape_what_is_offered();
   a_word_terminal_offers_its_property_if_any_spelling_fits();
+  a_condition_may_ask_for_a_longer_spelling();
+  a_candidate_keeps_the_trivia_before_it();
+  a_token_that_reads_on_into_the_spelling_ends_the_search();
+  a_member_hides_an_inherited_one_of_its_name();
   the_replaced_token_is_a_spelling_only_over_its_whole_span();
   a_context_names_the_node_of_its_token();
   a_token_ending_in_a_whole_letter_is_still_typed();

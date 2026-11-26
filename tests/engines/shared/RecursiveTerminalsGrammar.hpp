@@ -52,6 +52,11 @@ struct Base : cursiv::GrammarSpec {
   static constexpr auto Padding = many(cr<" "> | ref<Comment>);
   struct Directive : terminal<lit<"#!"> + !(Padding + lit<"[">) + some(any)> {};
   struct Asserted : terminal<&ref<Code> + ref<Code>> {};
+  // Each level checks its inner group, or that no `#` follows it, then reads it.
+  struct Checked : terminal<lit<"("> + option(&ref<Checked> + ref<Checked>) + lit<")">> {};
+  struct Unfollowed
+      : terminal<lit<"("> + option(!(ref<Unfollowed> + lit<"#">) + ref<Unfollowed>) + lit<")">> {
+  };
   struct Refused : terminal<!ref<Code> + lit<"b">> {};
   struct Repeated : terminal<many(ref<Code>) + lit<"z">> {};
   struct Some : terminal<some(ref<Code>) + lit<"z">> {};
@@ -131,6 +136,8 @@ struct Base : cursiv::GrammarSpec {
              (lit<"optional:"> + Read<Filled> + lit<"!">) |
              (lit<"directive:"> + (Read<Directive> | (lit<"#"> + lit<"!"> + Padding + lit<"[">))) |
              (lit<"asserted:"> + Read<Asserted> + lit<"!">) |
+             (lit<"checked:"> + Read<Checked> + lit<"!">) |
+             (lit<"unfollowed:"> + Read<Unfollowed> + lit<"!">) |
              (lit<"refused:"> + Read<Refused> + lit<"!">) |
              (lit<"many:"> + Read<Repeated> + lit<"!">) |
              (lit<"some:"> + Read<Some> + lit<"!">) |

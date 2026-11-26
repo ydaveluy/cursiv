@@ -697,6 +697,10 @@ void long_token_and_trivia_scans_read_the_stop() {
   const std::string word(kWatchedBytes + 2, 'a');
   Reading tokenReading(lexer.tables, word, stop.get_token());
   auto& tokenMachine = tokenReading.machine;
+  // An echo reads what the matcher's searches keep, made by a first search.
+  const Matcher matcher({{.onA = 1}}, {{}});
+  lexer.tables.match = &matcher.tables;
+  CHECK(tokenMachine.match(0, tokenMachine.src) == nullptr);
   Matching matching;
   matching.start(m, {}, false);
   for (TextOffset at = 0; at < 2048; ++at) matching.go({.at = at});
@@ -711,7 +715,7 @@ void long_token_and_trivia_scans_read_the_stop() {
   cancelled([&] { (void)m.gap_reads(0, m.src, m.end, true); });
   cancelled([&] { (void)m.indentation(m.src, m.indented); });
   cancelled([&] { (void)tokenMachine.ending(token(0, tokenMachine.end, 1)); });
-  cancelled([&] { (void)Matching::echoes(tokenMachine, {0, static_cast<TextOffset>(word.size())}, 0); });
+  cancelled([&] { (void)matching.echoes(tokenMachine, {0, static_cast<TextOffset>(word.size())}, 0); });
   cancelled([&] { matching.remember(m); });
 }
 

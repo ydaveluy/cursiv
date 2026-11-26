@@ -362,6 +362,16 @@ struct GuardedLiteral : cursiv::GrammarSpec {
   using hidden = NOTE;
 };
 
+// The `/` read where the end of input fails the guard of the other keeps its
+// priority over trivia that begins with it.
+struct FallbackKeyword : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
+  struct Root
+      : rule<create<ast::Doc>(lit<"x"> + (lit<"/", eof> | (kw<"/"> + lit<"**/">)))> {};
+  using entry = Root;
+};
+
 struct LiteralBesideGuard : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct NAME : terminal<some(cr<"a-zA-Z">)> {};
@@ -996,6 +1006,16 @@ struct Postfixed : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// Three hundred symbols in one production, or a branch that needs more.
+struct LongRun : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<create<ast::Doc>(
+                    (repeat<300>(lit<"x">) + lit<";"> + many(lit<"n">)) |
+                    (repeat<270>(lit<"x">) + lit<"k"> + lit<";"> + lit<"m"> + repeat<40>(lit<"n">)))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // A comment left open reads, where the lexer falls back, as a `/` and a `*`
 // that an expression after an invented name could take. Each keyword waits
 // for its own mark: readings in many modes reach the comment.
@@ -1116,6 +1136,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"braced:"> + ref<Braced::Root>) |
              (lit<"slots:"> + ref<Slots::Root>) |
              (lit<"postfixed:"> + ref<Postfixed::Root>) |
+             (lit<"longrun:"> + ref<LongRun::Root>) |
              (lit<"divided:"> + skip(ignore<Divided::WS>, hide<Divided::COMMENT>,
                                      ref<Divided::Root> + eof)) |
              (lit<"convergedarms:"> + ref<ConvergedArms::Root>) |
@@ -1132,6 +1153,9 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"conditionedtrivia:"> +
               skip(ignore<ConditionedTrivia::WS>, hide<ConditionedTrivia::NOTE>,
                    ref<ConditionedTrivia::Root> + eof)) |
+             (lit<"fallbackkeyword:"> +
+              skip(ignore<FallbackKeyword::WS, FallbackKeyword::COMMENT>, hide<>,
+                   ref<FallbackKeyword::Root> + eof)) |
              (lit<"guardedliteral:"> + skip(ignore<GuardedLiteral::WS>,
                                             hide<GuardedLiteral::NOTE>,
                                             ref<GuardedLiteral::Root> + eof)) |

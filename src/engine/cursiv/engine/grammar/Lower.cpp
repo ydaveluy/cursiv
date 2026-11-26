@@ -57,8 +57,9 @@ class Lowering {
     // the rules met before it. A node rule's record hands back the node its
     // body built, a data rule's converts what it read.
     for (std::size_t at = 0; at < _cfg.rules.size(); ++at) {
-      const auto [rule, nt, region] = _cfg.rules[at];
+      const auto [rule, nt, region, conditional] = _cfg.rules[at];
       _region = region;
+      _conditional = conditional;
       _rule = rule;
       const ImageStageDesc& stage = _image.stage(rule);
       if (stage.kind == ImageRuleKind::infix) {
@@ -154,13 +155,43 @@ class Lowering {
     };
     std::vector<std::vector<std::uint32_t>> tested;
     std::map<std::vector<std::uint32_t>, std::uint32_t> listed;
-    const auto and_then = [&](std::uint32_t guard, std::uint32_t g) {
+    const auto and_then = [&](std::uint32_t guard, std::span<const std::uint32_t> more) {
       std::vector<std::uint32_t> list = guard == kNone ? std::vector<std::uint32_t>{} : tested[guard];
-      if (const auto at = std::ranges::lower_bound(list, g); at == list.end() || *at != g)
-        list.insert(at, g);
+      for (const std::uint32_t g : more)
+        if (const auto at = std::ranges::lower_bound(list, g); at == list.end() || *at != g)
+          list.insert(at, g);
       const auto [known, fresh] = listed.try_emplace(list, static_cast<std::uint32_t>(tested.size()));
       if (fresh) tested.push_back(std::move(list));
       return known->second;
+    };
+    // Per nonterminal that reads nothing but tests of the gap, as `!gap::line`
+    // lowers or a rule of such tests does, those tests as a list of `tested`;
+    // kSeveral for any other. Each is told once, after what it reads.
+    constexpr std::uint32_t kUntold = kNone - 2;
+    std::vector<std::uint32_t> gaps;
+    const auto gaps_of = [&](std::uint32_t nt) {
+      gaps.resize(_cfg.nonterminals, kUntold);
+      for (std::vector<std::uint32_t> open{nt}; gaps[nt] == kUntold;) {
+        const std::uint32_t at = open.back();
+        const std::vector<std::uint32_t>& of = _cfg.productionsOf[at];
+        const Production* const q = of.size() == 1 ? &_cfg.productions[of.front()] : nullptr;
+        std::uint32_t list = kSeveral;
+        if (q != nullptr && q->rhs.empty() && q->tests.size() == 1 && q->tests.front().ahead.empty() &&
+            q->tests.front().condition == 0 && q->tests.front().gap != Test::Gap::any) {
+          list = and_then(kNone, of);
+        } else if (q != nullptr && !q->rhs.empty() && q->tests.empty() && blank[at]) {
+          list = kNone;
+          for (const Symbol s : q->rhs) {
+            const std::uint32_t read = gaps[index_of(s)];
+            if (read == kUntold) open.push_back(index_of(s));
+            else if (list != kSeveral) list = read == kSeveral ? kSeveral : and_then(list, tested[read]);
+          }
+          if (open.back() != at) continue;
+        }
+        gaps[at] = list;
+        open.pop_back();
+      }
+      return gaps[nt];
     };
     std::vector<Walk> walk;
     std::vector<std::uint32_t> entered(_cfg.nonterminals, kNone);
@@ -179,6 +210,10 @@ class Lowering {
           const std::uint32_t p = _cfg.productionsOf[from.nt][k];
           std::uint32_t guard = from.guard;
           leading(p, [&](std::size_t i, Symbol s) {
+            if (const std::uint32_t g = is_terminal(s) ? kSeveral : gaps_of(index_of(s)); g != kSeveral) {
+              guard = and_then(guard, tested[g]);
+              return;
+            }
             Symbol mine = s;
             const auto begun = opens.find({place, s});
             const bool copied =
@@ -207,10 +242,6 @@ class Lowering {
               return;
             }
             const std::uint32_t n = index_of(mine);
-            if (const std::uint32_t g = gap_test_of(n); g != kNone) {
-              guard = and_then(guard, g);
-              return;
-            }
             const bool own = from.own && (copied || n >= reached.size() || reached[n] != kSeveral);
             if (seen[n] != level) {
               seen[n] = level;
@@ -265,18 +296,6 @@ class Lowering {
     }
     for (Infix& table : _cfg.infixes)
       for (Infix::Level& level : table.levels) std::ranges::sort(level.past);
-  }
-
-  // The production of `nt` that reads nothing where the gap alone passes a
-  // test, as `!gap::line` lowers; kNone for any other nonterminal.
-  std::uint32_t gap_test_of(std::uint32_t nt) const {
-    const std::vector<std::uint32_t>& of = _cfg.productionsOf[nt];
-    if (of.size() != 1) return kNone;
-    const Production& q = _cfg.productions[of.front()];
-    return q.rhs.empty() && q.tests.size() == 1 && q.tests.front().ahead.empty() &&
-                   q.tests.front().condition == 0 && q.tests.front().gap != Test::Gap::any
-               ? of.front()
-               : kNone;
   }
 
   // A nonterminal that reads what `nt` reads: its productions over again.
@@ -477,11 +496,13 @@ class Lowering {
                       ", which its trivia scope passes: it never comes as a token there");
       return twin(t, Trivia::none);
     }
-    // A rule is lowered once a scope.
-    Symbol& known = slot(scope().rules, rule);
+    // A rule is lowered once a scope. A condition reads a copy of its own in a
+    // section only, where it names the close its own way.
+    const bool apart = _conditional && _cfg.regions[_region].end != kEndOfInput;
+    Symbol& known = slot(apart ? scope().conditionalRules : scope().rules, rule);
     if (known == kNone) {
       const std::uint32_t nt = _cfg.nonterminals++;
-      _cfg.rules.push_back({rule, nt, _region});
+      _cfg.rules.push_back({rule, nt, _region, apart});
       known = nonterminal(nt);
     }
     return known;
@@ -496,26 +517,24 @@ class Lowering {
     if (known != kNone) return static_cast<std::uint16_t>(known);
     // A terminal that is indentation is made by the parse, not read.
     const ImageId body = body_of(rule);
-    if (const ImageKind kind = _image.nodes[body].kind;
-        kind == ImageKind::indent || kind == ImageKind::dedent) {
-      known = indentation(kind == ImageKind::indent);
-      if (_cfg.terminals[known].named)
-        throw Refused("terminal " + std::string(_image.rules[rule]->name) +
-                      " is a second indent or dedent terminal");
-      _cfg.terminals[known].name = std::string(_image.rules[rule]->name);
-      _cfg.terminals[known].named = true;
-      return static_cast<std::uint16_t>(known);
-    }
-    known = add_terminal({});
+    const ImageKind kind = _image.nodes[body].kind;
+    const bool made = kind == ImageKind::indent || kind == ImageKind::dedent;
+    known = made ? indentation(kind == ImageKind::indent) : add_terminal({});
     Terminal& t = _cfg.terminals[known];
-    t.body = body;
+    if (t.named)
+      throw Refused("terminal " + std::string(_image.rules[rule]->name) +
+                    " is a second indent or dedent terminal");
+    if (!made) t.body = body;
     std::vector<FoldedWord> folded;
-    const bool allWords = spelled(t, &folded);
+    const bool allWords = made || spelled(t, &folded);
     t.name = std::string(_image.rules[rule]->name);
     t.named = true;
-    // A named terminal's leaf carries its conversion. No action is
-    // published for one that only conditions name: it writes no leaf.
-    if (_action.contains(stage->convertRow)) t.entry = entry_of(stage->convertRow);
+    // A named terminal's leaf carries its conversion, an indentation token's
+    // only where it converts. No action is published for one that only
+    // conditions name: it writes no leaf.
+    if (const auto action = _action.find(stage->convertRow);
+        action != _action.end() && (!made || _cfg.rows[action->second]->converts != Converts::nothing))
+      t.entry = entry_of(stage->convertRow);
     if (t.folded || !folded.empty()) {
       std::uint16_t fold = 1;
       if (!allWords || folded.size() != t.words.size()) {
@@ -560,10 +579,10 @@ class Lowering {
           (std::ranges::binary_search(named, t) || std::ranges::binary_search(named, x.twin)))
         _cfg.newlineIn.push_back(t);
     }
+    // Each named token is trivia itself or through a twin some scope passes.
     for (const std::uint16_t n : named)
-      if (std::ranges::none_of(_cfg.newlineIn, [&](std::uint16_t t) {
-            return t == n || _cfg.terminals[t].twin == n;
-          }))
+      if (_cfg.terminals[n].trivia == Trivia::none && !_twins.contains({n, Trivia::ignored}) &&
+          !_twins.contains({n, Trivia::hidden}))
         throw Refused("indent_newline_in names a token that is not trivia");
   }
 
@@ -645,14 +664,15 @@ class Lowering {
     return known;
   }
 
-  // What `t` is said to be from its body: a literal where that is one
-  // spelling, under its comments.
+  // What `t` is said to be from its body, past its comments and the terminals
+  // it calls: a literal where that is one spelling.
   bool spelled(Terminal& t, std::vector<FoldedWord>* folded = nullptr) const {
     ImageId id = t.body;
     if (_image.nodes[id].kind == ImageKind::doc) {
       t.doc = _image.nodes[id].text;
       id = _image.children[_image.nodes[id].first];
     }
+    id = _image.bare(id);
     const ImageNode& n = _image.nodes[id];
     if (n.kind != ImageKind::lit) {
       t.name = "a token";
@@ -674,8 +694,9 @@ class Lowering {
     while (!todo.empty()) {
       ImageId child = todo.back();
       todo.pop_back();
-      const ImageNode& outer = _image.nodes[child];
+      const ImageNode outer = _image.nodes[child];
       if (outer.kind == ImageKind::doc) child = _image.children[outer.first];
+      child = _image.bare(child);
       const ImageNode& n = _image.nodes[child];
       if (n.kind == ImageKind::choice) {
         for (std::uint32_t k = n.count; k-- > 0;) todo.push_back(_image.children[n.first + k]);
@@ -930,9 +951,11 @@ class Lowering {
     Test test;
     test.unless = n.kind == ImageKind::notOf;
     test.elected = _image.nodes[_image.children[n.first]].kind == ImageKind::trigger;
+    const bool outer = std::exchange(_conditional, true);
     if (named(_image.children[n.first], test.ahead)) {
       std::ranges::sort(test.ahead);
       test.ahead.erase(std::unique(test.ahead.begin(), test.ahead.end()), test.ahead.end());
+      _conditional = outer;
       co_return test;
     }
     // What it reads is more than a token: a production of its own reads
@@ -940,7 +963,6 @@ class Lowering {
     refuse_recursion(_image.children[n.first]);
     test.ahead.clear();
     Alternative read;
-    const bool outer = std::exchange(_conditional, true);
     co_await emit(_image.children[n.first], read);
     _conditional = outer;
     produce(_cfg.nonterminals++, std::move(read));
@@ -1335,10 +1357,10 @@ class Lowering {
   // writes kept apart: it names tokens its own way and writes no record.
   // Terminals are kept in scope 0 alone.
   struct Scope {
-    std::vector<Symbol> rules, nodes, conditional;
+    std::vector<Symbol> rules, nodes, conditionalRules, conditionalNodes;
   };
   Scope& scope() { return _scopes[_region]; }
-  std::vector<Symbol>& nodes() { return _conditional ? scope().conditional : scope().nodes; }
+  std::vector<Symbol>& nodes() { return _conditional ? scope().conditionalNodes : scope().nodes; }
   // The scope of the given lists of trivia rules, made where it is new: in
   // the text of the scope under way, or of a section of `grammar` that ends
   // at `end`.

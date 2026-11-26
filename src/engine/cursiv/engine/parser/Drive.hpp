@@ -51,6 +51,12 @@ struct Drive {
   CURSIV_ALWAYS_INLINE static std::uint32_t cell(std::uint32_t row, std::uint16_t terminal) {
     return act(row, terminal).at;
   }
+  // Whether state `state` has an action on `terminal`.
+  CURSIV_ALWAYS_INLINE static bool follows(std::uint32_t state, std::uint16_t terminal) {
+    const std::uint64_t* const set =
+        L::terminalSets + std::size_t{L::followOf[state]} * L::followWords;
+    return terminal < L::terminals && ((set[terminal / 64] >> (terminal % 64)) & 1) != 0;
+  }
   // The operands of a cell past its `value`: its element or count, then its
   // gap or what it reads again; or both as one.
   CURSIV_ALWAYS_INLINE static std::uint16_t element(std::uint32_t at) {
@@ -91,8 +97,9 @@ struct Drive {
   }
 
   // The state on top entered with no token: it acts on the token its mode
-  // reads, or on a line's indentation before its first token. Written for a
-  // `Mode`, the `Base` of a state's row and the `Cells` of a row of few.
+  // reads, or on the indentation of a line that does not keep its level.
+  // Written for a `Mode`, the `Base` of a state's row and the `Cells` of a
+  // row of few.
   template <class M, std::uint32_t Mode = kNoStack, std::uint32_t Base = kNoStack,
             std::uint32_t... Cells>
   CURSIV_PRESERVE_NONE static Exit read(M& m, const char* p, NodeCount, const char* tokenEnd,
@@ -103,7 +110,9 @@ struct Drive {
     if constexpr (L::indents) {
       if (m.indented.bracket == 0 && m.lexing().line_start(p)) [[unlikely]] {
         const Token made = m.lexing().indentation(p, m.indented);
-        indented = made.end != nullptr;
+        indented = made.end != nullptr &&
+                   (follows(m.under(), made.terminal()) ||
+                    !m.lexing().first_ends_line(p, m.lexing().t.stateMode[m.under()]));
         if (indented) tok = made;
       }
     }
@@ -197,10 +206,7 @@ struct Drive {
   template <class M, auto Next>
   CURSIV_PRESERVE_NONE static Exit followed(M& m, const char* p, NodeCount at,
                                             const char* tokenEnd, std::uint64_t tokenHead) {
-    const std::uint16_t terminal = Token{tokenEnd, tokenHead}.terminal();
-    const std::uint64_t* const follows =
-        L::terminalSets + std::size_t{L::followOf[m.under()]} * L::followWords;
-    if (terminal < L::terminals && ((follows[terminal / 64] >> (terminal % 64)) & 1) != 0)
+    if (follows(m.under(), Token{tokenEnd, tokenHead}.terminal()))
       CURSIV_MUSTTAIL return Next(m, p, at, tokenEnd, tokenHead);
     CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
   }

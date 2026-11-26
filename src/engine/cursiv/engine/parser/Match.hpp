@@ -101,7 +101,7 @@ class Matching {
     if (_furthest == kNoMark || at > _furthest) _furthest = at;
   }
   // Whether the text at `at` reads mark `mark` again, as it was written.
-  [[nodiscard]] static bool echoes(Machine& m, MatchMark mark, TextOffset at);
+  [[nodiscard]] bool echoes(Machine& m, MatchMark mark, TextOffset at);
   void ask(std::uint32_t entry, bool unless, const MatchThread& then) {
     asked.push_back({entry, unless, then});
   }
@@ -140,15 +140,18 @@ class Matching {
     if (th.call == 0) _passed.push_back(key);
     return true;
   }
-  // A failed search proves its visited suffixes empty. On a single thread
-  // with no scanner's end, an end beyond a visited place belongs to that suffix.
+  // A condition's search leaves the ends of its calls to the token's later
+  // searches. A failed search proves its visited suffixes empty and its calls
+  // read every way; on a single thread with no scanner's end, an end beyond a
+  // visited place belongs to that suffix.
   void remember(Machine& m);
 
   std::vector<Asked> asked;
 
  private:
   static constexpr std::uint32_t kNoLink = ~std::uint32_t{0};
-  // The threads a search reads as they come before it reads each once.
+  // The threads a search reads as they come, and their runs whole, before it
+  // reads each once and their runs through the known runs.
   static constexpr std::uint32_t kUnchecked = 32;
   using Ranges = std::map<TextOffset, TextOffset>;
   struct Call {

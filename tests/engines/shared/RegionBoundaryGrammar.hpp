@@ -111,6 +111,16 @@ struct Base : cursiv::GrammarSpec {
       lit<"commit-note:"> +
       skip(ignore<WS>, hide<>, lit<"["> + many(commit(lit<",">, item))) +
       lit<";">)> {};
+  // Left-recursive runs that may read nothing open a region: each keeps its
+  // own write.
+  struct Commas : rule<(ref<Commas> + lit<",">) | option(lit<"y">)> {};
+  struct Bangs : rule<(ref<Bangs> + lit<"!">) | option(lit<"z">)> {};
+  struct Dots : rule<(ref<Dots> + lit<".">) | option(lit<"w">)> {};
+  struct LeadingRuns : rule<create<Document>(
+      lit<"runs:"> +
+      tight(append<&Document::items>(ref<Commas>) +
+            append<&Document::items>(ref<Bangs>) +
+            append<&Document::items>(ref<Dots>) + lit<";">))> {};
   // A condition skips the note its caller reads here as a token, however many
   // stand before the name it looks for.
   struct SkipHas : rule<create<Document>(
@@ -161,7 +171,8 @@ struct Base : cursiv::GrammarSpec {
              ref<CalledMany> | ref<CalledUnordered> | ref<CalledNullable> |
              ref<Same> | ref<SameHead> | ref<PatternHead> | ref<ShortItem> |
              ref<LongItem> | ref<NestHead> | ref<CommitTail> | ref<CommitNote> |
-             ref<SkipHas> | ref<SkipNot> | ref<SkipNested> | ref<SkipRecord> | ref<Lines>> {};
+             ref<LeadingRuns> | ref<SkipHas> | ref<SkipNot> | ref<SkipNested> |
+             ref<SkipRecord> | ref<Lines>> {};
   using entry = Root;
   using ignored = WS;
   using hidden = NOTE;

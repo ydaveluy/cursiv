@@ -119,6 +119,16 @@ struct Signs : Base {
   };
 };
 
+// A table of a prefix level alone writes no left operand: a rule that takes
+// its node over writes one.
+struct Adopted : Base {
+  struct Name : rule<create<ast::Name>(assign<&ast::Name::name>(ref<ID>))> {};
+  struct Word : rule<create<ast::Binary>(assign<&ast::Binary::op>(ref<ID>))> {};
+  struct E : infix<Word, ast::Binary, prefix<&ast::Binary::op, &ast::Binary::right>(lit<"-">)> {};
+  struct Left : rule<ref<E> + lit<"<"> + assign<&ast::Binary::left>(ref<Name>)> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<Left>)) + eof> {};
+};
+
 // Binary operators that read on within a line only: a line that opens with
 // one begins a statement of its own.
 struct Gapped : Base {
@@ -134,6 +144,17 @@ struct Gapped : Base {
              create<ast::Braced>(lit<"{"> + many(append<&ast::Block::items>(ref<E>) + eos) +
                                  lit<"}">)> {};
   struct E : infix<Primary, ast::Binary,
+                   levels(prefix<ast::Signed>(sign), left(ref<Lined<lit<"*">>>),
+                          left(ref<Lined<sign>>), nonassoc(ref<Lined<lit<"<">>>))> {};
+  struct Root : rule<create<ast::Lines>(many(append<&ast::Lines::items>(ref<E>) + eos)) + eof> {};
+};
+
+// The same operators, their guard read through a rule of its own.
+struct Factored : Gapped {
+  struct SameLine : rule<!gap::line> {};
+  template <auto Op>
+  struct Lined : rule<ref<SameLine> + Op> {};
+  struct E : infix<Name, ast::Binary,
                    levels(prefix<ast::Signed>(sign), left(ref<Lined<lit<"*">>>),
                           left(ref<Lined<sign>>), nonassoc(ref<Lined<lit<"<">>>))> {};
   struct Root : rule<create<ast::Lines>(many(append<&ast::Lines::items>(ref<E>) + eos)) + eof> {};
@@ -292,6 +313,18 @@ struct Lines : cursiv::GrammarSpec {
             (append<&ast::Block::items>(ref<Name>) + ref<NEWLINE>))> {};
   struct Blocks : rule<create<ast::Lines>(many(append<&ast::Lines::items>(
                       ref<Nested>)))> {};
+  // A line end that reads the `b` after it: a comment's line end is none.
+  struct JOINED : terminal<eol + lit<"b">> {};
+  struct Joined : rule<create<ast::Lines>(append<&ast::Lines::items>(ref<Name>) + ref<JOINED> +
+                                          append<&ast::Lines::items>(ref<Name>))> {};
+  // Two arms an empty rule of each opens: the first reads a line end between
+  // its names, which a comment's line end stands for.
+  struct Ends : rule<create<ast::Block>> {};
+  struct Runs : rule<create<ast::Braced>> {};
+  static constexpr auto item = [](auto of) { return append<&ast::Lines::items>(of); };
+  struct Told : rule<create<ast::Lines>(
+                    (item(ref<Ends>) + item(ref<Name>) + ref<NEWLINE> + item(ref<Name>)) |
+                    (item(ref<Runs>) + item(ref<Name>) + item(ref<Name>)))> {};
 };
 
 // Rules that may read nothing, nested two by two, which only what follows them
@@ -327,7 +360,9 @@ struct Suite : Base {
                      (lit<"members:"> + ref<Members::Root>) |
                      (lit<"cyclic:"> + ref<Cyclic::Root>) |
                      (lit<"signs:"> + ref<Signs::Root>) |
+                     (lit<"adopted:"> + ref<Adopted::Root>) |
                      (lit<"gapped:"> + ref<Gapped::Root>) |
+                     (lit<"factored:"> + ref<Factored::Root>) |
                      (lit<"spaced:"> + ref<Spaced::Root>) |
                      (lit<"guarded:"> + ref<GuardedTurns::Root>) |
                      (lit<"lines:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
@@ -339,7 +374,11 @@ struct Suite : Base {
                      (lit<"empties:"> + ref<Empties::Root> + eof) |
                      (lit<"few:"> + ref<Empties::Few> + eof) |
                      (lit<"blocks:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
-                                            ref<Lines::Blocks> + eof))> {};
+                                            ref<Lines::Blocks> + eof)) |
+                     (lit<"glued:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
+                                            ref<Lines::Joined> + eof)) |
+                     (lit<"told:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
+                                          ref<Lines::Told> + eof))> {};
   using entry = Root;
   using hidden = Lines::NOTE;
   using indent_newline = Lines::NEWLINE;

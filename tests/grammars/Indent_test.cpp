@@ -199,9 +199,19 @@ void a_condition_tests_the_indent_the_parse_makes() {
 
 }  // namespace
 
+// An insertion that no token comes before stands before the token it is read
+// ahead of, past the comments, not at the start of the text.
+void an_insertion_with_no_token_before_stands_at_the_next() {
+  const auto r = tindent::generated::G::createParser()->parse("# note\n[a]\n");
+  CHECK(r.accepted && !r.diagnostics.empty());
+  CHECK(r.diagnostics.front().kind == cursiv::DiagnosticKind::Inserted &&
+        r.diagnostics.front().begin == 7);
+}
+
 int main() {
   a_condition_tests_the_indent_the_parse_makes();
   an_indent_keeps_an_earlier_repair_reading_alive();
+  an_insertion_with_no_token_before_stands_at_the_next();
   an_indent_resolves_a_cell();
   a_refused_dedent_at_the_end_leaves_the_implied_token();
   a_dropped_level_closes_in_the_graph();
@@ -243,6 +253,9 @@ int main() {
   // A deeper line where no suite opens is an error, and the parse goes on.
   CHECK(recovers(*engine, "a\n  b\nc\n"));
   CHECK(parse("a:\n  b\n") == "a(b)");
+  // A line whose first token ends it is as blank: its blanks open no level.
+  CHECK(parse("lead\n   # c\na\n") == "a");
+  CHECK(parse("lead\n   ; c\n; d\na:\n  b\n") == "a(b)");
   // EOF also ends a blank line: its run must neither open a suite nor
   // disagree with an existing level, even when tabs and spaces differ.
   for (const std::string_view blank : {"  ", "\t", " \t "}) {
@@ -325,6 +338,19 @@ int main() {
   const auto bare = tindent::repaired::generated::G::createParser();
   CHECK(parse_with(*bare, "a:\n  b:\n    c\n  d\ne\n") == "a(b(c) d) e");
   CHECK(parse_with(*bare, "a:\n  b\n").empty() == false);
+  // Indentation tokens convert what they read, though a dedent reads nothing.
+  {
+    const auto r = bare->parse("$\n  x\n");
+    const auto* const node = r.valueAs<tindent::ast::Counted>();
+    CHECK(r.accepted && r.diagnostics.empty() && node != nullptr);
+    if (node != nullptr) {
+      if (node->name != "[x" || node->dedents != 1)
+        std::printf("converted: name \"%.*s\", dedents %lld\n", static_cast<int>(node->name.size()),
+                    node->name.data(), static_cast<long long>(node->dedents));
+      CHECK(node->name == "[x");
+      CHECK(node->dedents == 1);
+    }
+  }
   // The indentation is read where the newline ends. One that carries the
   // lines of comments leaves a line of content there, whatever column a
   // comment stands at; a comment the newline leaves is a line of content.
@@ -335,6 +361,8 @@ int main() {
   CHECK(parse_with(*folded, "a:\n#x\n  b\n") == "a(b)");
   CHECK(parse_with(*folded, "a:\n  b\n#x\n#y\n  c\nd\n") == "a(b c) d");
   CHECK(parse_with(*folded, "a:\n  b #x\n  c\n") == "a(b c)");
+  CHECK(parse_with(*folded, "crlf (\r\nx)\r\n") == "x");
+  CHECK(parse_with(*folded, "crlf (\nx)\n") == "x");
   {
     const auto r = folded->parse("a:\n  b\n  #x\n      c\n");
     CHECK(r.accepted && !r.diagnostics.empty());

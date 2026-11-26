@@ -48,6 +48,8 @@ void exercise(const cursiv::Parser& parser) {
                           "optional:q!",
                           "optional:nnq!",
                           "asserted:{{}}!",
+                          "checked:((()))!",
+                          "unfollowed:((()))!",
                           "refused:b!",
                           "many:z!",
                           "many:{}{{}}z!",
@@ -98,6 +100,8 @@ void exercise(const cursiv::Parser& parser) {
                           "code:{{}!",
                           "continuation:aa!",
                           "asserted:{{}!",
+                          "checked:(()!",
+                          "unfollowed:(())#!",
                           "asserted:x!",
                           "asserted:",
                           "refused:{}!",
@@ -166,6 +170,10 @@ void exercise(const cursiv::Parser& parser) {
   const std::string mark(2048, '-');
   check(parser, "echo:<" + mark + ">" + mark + "!", false);
   check(parser, "echo:<" + mark + ">]" + mark + ";", true);
+  // The searches of a token share what they read: a group nested 20000 deep
+  // that checks each level before reading it reads in linear time.
+  for (const auto prefix : {"checked:", "unfollowed:"})
+    check(parser, prefix + std::string(20000, '(') + std::string(20000, ')') + "!", true);
 }
 
 void check_window(std::string_view prefix, std::string_view text, unsigned width,

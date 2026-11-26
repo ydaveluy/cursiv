@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "cursiv/grammar/Conversion.hpp"
 #include "cursiv/grammar/GrammarSpec.hpp"
@@ -169,11 +170,12 @@ struct Nested : Base {
                      eof> {};
 };
 
-// A list of optional views takes texts a converter built: the tree keeps
-// their bytes.
+// A list of optional views takes texts as they stand: the source's, or the
+// bytes the tree keeps of what a converter built.
 struct Shouts : Base {
   struct Root : rule<create<ast::Shouted>(many(
-                         append<&ast::Shouted::shouts>(ref<Called::Shout>))) +
+                         append<&ast::Shouted::shouts>(ref<Called::Shout>) |
+                         append<&ast::Shouted::shouts>(ref<ID>))) +
                      eof> {};
 };
 
@@ -427,6 +429,13 @@ inline constexpr auto upper = [](std::string_view text) {
   return out;
 };
 
+// Answers its text as it reads it, and lists it in `seen`.
+inline std::vector<std::string_view> seen;
+inline constexpr auto noted = [](std::string_view text) {
+  seen.push_back(text);
+  return text;
+};
+
 struct Base : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct COMMENT : terminal<through(lit<"/*">, lit<"*/">)> {};
@@ -459,6 +468,9 @@ struct Base : cursiv::GrammarSpec {
   struct WithLit : rule<as<bars>(ref<ID> + ref<Lit> + ref<ID>)> {};
   struct LitParts : rule<as<bars>(lit<"literal">)> {};
 
+  // A text conversion nested on both sides.
+  struct Nest : rule<as<noted>(option(lit<"("> + ref<Nest> + lit<")"> + ref<Nest>))> {};
+
   struct Root : rule<create<ast::Name>(
                     (kw<"q"> + assign<&ast::Name::parts>(ref<Qualified>)) |
                     (kw<"t"> + assign<&ast::Name::parts>(ref<Tailed>)) |
@@ -471,7 +483,8 @@ struct Base : cursiv::GrammarSpec {
                     (kw<"p"> + assign<&ast::Name::parts>(ref<LitParts>) +
                      lit<";">) |
                     (kw<"k"> + assign<&ast::Name::text>(ref<Lit>) + lit<";">) |
-                    (kw<"j"> + assign<&ast::Name::text>(ref<Joined>)))> {};
+                    (kw<"j"> + assign<&ast::Name::text>(ref<Joined>)) |
+                    (kw<"r"> + assign<&ast::Name::text>(ref<Nest>)))> {};
   using entry = Root;
   using ignored = WS;
   using hidden = COMMENT;

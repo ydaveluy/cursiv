@@ -269,6 +269,8 @@ struct Machine {
   // the line.
   // The muted levels the line closes are let go from `at`.
   [[nodiscard]] Token indentation(const char* p, Indented& at);
+  // Whether the first token `mode` reads from `p`, past trivia, ends a line.
+  [[nodiscard]] bool first_ends_line(const char* p, std::uint16_t mode);
   // The token in hand read from `p`, or an empty line terminal before it
   // where the gap holds a line end inside a trivia the grammar names and
   // state `state` reads that terminal as it reads a line end standing there.
@@ -470,7 +472,7 @@ struct Machine {
     return at + kWatchedBytes;
   }
   // The end of the run of set `run` from `p` on, read by its scanner with
-  // the stop watched on the way.
+  // the stop watched on the way; a known run of the set it meets is joined.
   [[nodiscard]] const char* run_on(std::uint32_t run, const char* p);
   // Resume a generated reader at a watched stop or an opening that needs the
   // DFA. At the end of the text or past it, the token is the end.

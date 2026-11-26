@@ -185,7 +185,7 @@ Closers closers(const Cfg& cfg, const LrAutomaton& automaton) {
       kernel.push_back(
           KernelCost{.lhs = dot == 0 ? KernelCost::kAccept : static_cast<std::uint16_t>(prods[prod].lhs),
                      .symbol = reads ? static_cast<std::uint16_t>(index_of(rhs[dot])) : KernelCost::kNone,
-                     .dot = static_cast<std::uint8_t>(std::min<std::size_t>(dot, 255)),
+                     .dot = static_cast<std::uint16_t>(dot),
                      .rest = capped(rest_of(prod, dot)),
                      .after = capped(dot < rhs.size() ? rest_of(prod, dot + 1) : 0)}
               .packed());

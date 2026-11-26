@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -194,10 +195,13 @@ struct converter_rule<void> {
 template <class R>
 using converter_rule_t = typename converter_rule<R>::type;
 
+// The value a rule's text gives, and whether a conversion made it: only one
+// makes a `std::string`, on the rule or below it.
 template <class R>
 struct text_value {
   using type = rule_type_t<R>;
-  static constexpr bool converted = !std::is_void_v<converter_rule_t<R>>;
+  static constexpr bool converted =
+      !std::is_void_v<converter_rule_t<R>> || std::is_same_v<type, std::string>;
 };
 template <>
 struct text_value<void> {

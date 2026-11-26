@@ -401,6 +401,20 @@ void an_enum_is_a_plain_value_member() {
         cursiv::detail::FieldContent::value);
 }
 
+// A terminal that reads a word in any case through another converts it so.
+void an_alias_of_a_folded_word_converts_in_any_case() {
+  for (const std::string_view word : {"priv", "PRIV", "Priv"}) {
+    const std::string text = "$enum alias " + std::string(word);
+    const cursiv::ParseResult r = engine().parse(text);
+    const auto* const d = r.valueAs<Decl>();
+    const bool ok = r.diagnostics.empty() && d != nullptr && d->vis == Vis::priv;
+    if (!ok)
+      std::printf("alias %.*s: %zu diagnostics%s\n", static_cast<int>(word.size()), word.data(),
+                  r.diagnostics.size(), d != nullptr && d->vis == Vis::priv ? "" : ", not priv");
+    CHECK(ok);
+  }
+}
+
 }  // namespace enm
 
 namespace bare {
@@ -1593,6 +1607,12 @@ void the_accessors_read_past_a_property_of_the_same_name() {
   // The root is the top of the tree, the document above it left out.
   CHECK(&cursiv::rootOf(node) == &above);
   CHECK(&cursiv::rootOf(above) == &above);
+  // A node built for a record holds it in its own field.
+  cursiv::ParseResult result(cursiv::Cst{"x"});
+  const cursiv::detail::AstMetaData meta{};
+  cursiv::ParseResultBuilder builder(result, meta);
+  const Masking* built = builder.createNode<Masking>(0);
+  CHECK(cursiv::cstNodeIdOf(*built) == 0 && built->cstNodeId == 9);
 }
 
 void run() {
@@ -1604,6 +1624,7 @@ void run() {
   infix::the_climb_contributes_its_members();
   region::the_nest_names_a_node_member();
   enm::an_enum_is_a_plain_value_member();
+  enm::an_alias_of_a_folded_word_converts_in_any_case();
   bare::no_directive_no_columns();
   exact::every_alternative_is_kept();
   nodealt::both_families_are_reachable();
@@ -2005,16 +2026,17 @@ void nested_text_joins_preserve_every_view() {
   cursiv::ParseResultBuilder builder(result, meta);
   std::string expected = "name";
   std::string_view text = "name";
+  cursiv::ParseResultBuilder::Joined last;
   std::vector<std::pair<std::string_view, std::string>> retained;
   for (unsigned i = 0; i < 64; ++i) {
     const std::string_view prefix = i % 2 ? "a." : "";
     const std::string_view suffix = i % 2 ? "" : ".b";
-    text = builder.keepText(std::array{prefix, text, suffix});
+    text = builder.keepText(std::array{prefix, text, suffix}, &last);
     expected = std::string(prefix) + expected + std::string(suffix);
     retained.emplace_back(text, expected);
   }
   const auto slice = text.substr(10, 5);
-  const auto name = builder.keepText(std::array{slice, std::string_view{"!"}});
+  const auto name = builder.keepText(std::array{slice, std::string_view{"!"}}, &last);
   CHECK(name == std::string(slice) + "!");
   for (const auto& [view, original] : retained) CHECK(view == original);
 }
@@ -2171,10 +2193,12 @@ void a_terminal_feeds_a_view_and_a_decoded_string() {
 // A data rule passes a built string on to a class made from it, as a converter
 // on the rule itself would.
 void a_passed_on_string_builds_a_class() {
-  const auto parsed = engine().parse(R"(chain "a" "b" @tag)");
+  const auto parsed = engine().parse(R"(chain "a" "b" @tag owned tagged @word)");
   CHECK(parsed && parsed.diagnostics.empty());
   const auto* doc = parsed.valueAs<chain::Doc>();
-  CHECK(doc != nullptr && doc->boxed.text == "tag");
+  CHECK(doc != nullptr && doc->boxed.text == "tag" && doc->owned.text == "owned");
+  const auto* tagged = doc != nullptr ? std::get_if<chain::Boxed>(&doc->tagged) : nullptr;
+  CHECK(tagged != nullptr && tagged->text == "word");
 }
 
 // A class with no empty state fills an optional and a list, and a converter

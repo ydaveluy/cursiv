@@ -59,7 +59,8 @@ struct LexMatcher {
 };
 
 // A condition's automaton as the runtime reads it: `flags[state]` has bit 0
-// where the text read matches, bit 1 where it does if the input ends there.
+// where a match ends in the text read, bit 1 where the text read is one if the
+// input ends there.
 struct LexMonitor {
   std::array<std::uint8_t, 256> classOf{};
   unsigned nclasses = 0;
@@ -213,9 +214,6 @@ class LexAutomatonBuilder {
   // The branches of `body` that rank apart, each with whether it is one
   // literal.
   [[nodiscard]] std::vector<std::pair<ImageId, bool>> branches(ImageId body) const;
-  // `id` past the comments written on it and the calls to terminals that
-  // read nothing else.
-  [[nodiscard]] ImageId bare(ImageId id) const;
   // Features of a body that affect its matcher program or its DFA prefix.
   enum : std::uint8_t { kCalls = 1, kEchoes = 2, kMarks = 4, kScanner = 8, kLoop = 16 };
   std::uint8_t needs(ImageId id);

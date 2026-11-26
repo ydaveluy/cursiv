@@ -218,9 +218,13 @@ struct GrammarImage {
   // Whether the grammar a rule belongs to is case-insensitive: the embedded
   // one for a section's rule, else this one.
   bool folds(std::uint32_t rule) const;
+  // `id` past the comments written on it and the calls to terminals that
+  // read nothing else, each chain followed once.
+  ImageId bare(ImageId id);
 
  private:
   detail::Descent<ImageId> make_node(const ImageDesc& desc, bool folded);
+  std::vector<ImageId> _bare;
 
   std::unordered_map<const ImageDesc*, ImageId> _nodes;
   std::unordered_map<const ImageDesc*, ImageId> _foldedNodes;

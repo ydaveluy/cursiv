@@ -723,9 +723,14 @@ class Emitter {
         for (const std::uint16_t m : _held[t]) {
           const std::string a = row(_memberAction[m]);
           held.push_back("{" + a + ".name, " + a + ".referenceTag}");
-          if (m < _references) refs.push_back(m);
           if (holds_nodes(*_members[m])) children.push_back(m);
         }
+        // A name finds the most derived member of it, last held: a reference
+        // that a later member of its name hides is not found.
+        std::unordered_set<std::string_view> named;
+        for (const std::uint16_t m : std::views::reverse(_held[t]))
+          if (named.insert(_members[m]->name).second && m < _references) refs.push_back(m);
+        std::ranges::reverse(refs);
         const std::string name = "kProperties" + std::to_string(t);
         table("::cursiv::PropertyMetaData", name, held, "{}");
         properties.push_back("{" + name + ", " + std::to_string(held.size()) + "}");

@@ -483,8 +483,6 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
   }
   Closers needs = closers(cfg, automaton);
   refuse_empty_cycles(cfg, needs.nullable);
-  out.cornerAt = std::move(needs.cornerAt);
-  out.corners = std::move(needs.corners);
   out.nullable = needs.nullable;
   for (std::size_t s = 0; s < nstates; ++s) {
     states[s].close = std::move(needs.rows[s]);
@@ -727,6 +725,21 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
     for (const std::uint32_t reads : automaton.conditions) out.conditions.push_back(number[reads]);
     out.order = election_order(cfg, needs.turns);
   }
+  // The left corners a completion looks up: of each nonterminal a kernel item
+  // of a state kept reads after its dot, those such an item completes.
+  std::vector<bool> asked(nnts, false), completed(nnts, false);
+  for (const PackedState& state : out.states)
+    for (const std::uint64_t packed : state.kernel) {
+      const KernelCost item = KernelCost::of(packed);
+      if (item.symbol != KernelCost::kNone) asked[item.symbol] = true;
+      if (item.lhs != KernelCost::kAccept) completed[item.lhs] = true;
+    }
+  out.cornerAt.push_back(0);
+  for (std::size_t nt = 0; nt < nnts; ++nt) {
+    for (auto c = needs.cornerAt[nt]; asked[nt] && c != needs.cornerAt[nt + 1]; ++c)
+      if (completed[needs.corners[c] & 0xFFFF]) out.corners.push_back(needs.corners[c]);
+    out.cornerAt.push_back(static_cast<std::uint32_t>(out.corners.size()));
+  }
   gaps.resize(gapOf.size());
   for (auto& [set, at] : gapOf) gaps[at] = set;
   return reduced;
@@ -838,6 +851,7 @@ void terminal_sets(const Cfg& cfg, const LexDfa& dfa, Packed& out) {
     const auto [list, fresh] =
         kernelLists.try_emplace(state.kernel, static_cast<std::uint16_t>(kernelLists.size()));
     if (fresh) {
+      if (kernelLists.size() > 0xFFFF) throw Refused("the grammar has too many kernels");
       out.kernels.insert(out.kernels.end(), state.kernel.begin(), state.kernel.end());
       out.kernelAt.push_back(static_cast<std::uint32_t>(out.kernels.size()));
     }
@@ -887,13 +901,18 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
       trivia.set(t);
     if (cfg.terminals[t].trivia != Trivia::none) passed.set(t);
   }
-  // Where a bracket mutes line ends, the end of a line is a blank: where no
-  // trivia reads a line ending, every state reads the line's terminal to
-  // pass it there.
-  bool lines = cfg.newline != 0;
-  for (const unsigned char end : {'\n', '\r'})
-    lines = lines && (dfa.nstates() < 2 ||
-                      !dfa.reach[dfa.next[dfa.nclasses + dfa.classOf[end]]].intersects(passed));
+  // Where a bracket mutes line ends, the end of a line is a blank: where a
+  // line end byte is no trivia's, every state reads the line's terminal to
+  // pass it there, by name only where a trivia may read one, to yield to it.
+  bool lines = dfa.nstates() < 2, yields = false;
+  for (const unsigned char end : {'\n', '\r'}) {
+    if (dfa.nstates() < 2) break;
+    const std::uint16_t at = dfa.next[dfa.nclasses + dfa.classOf[end]];
+    yields = yields || dfa.reach[at].intersects(passed);
+    lines = lines || std::ranges::none_of(dfa.acceptSets[dfa.acceptSet[at]],
+                                          [&](const LexAccept& a) { return passed.test(a.term); });
+  }
+  lines = lines && cfg.newline != 0;
   auto& modeTerminals = out.modeTerminals;
   // A mode is what it reads, and of that what only tests name.
   std::map<std::pair<Bits, Bits>, std::uint16_t> modes;
@@ -931,11 +950,12 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
           (action.kind != PackedAction::Kind::reduce ||
            !tested_only(cfg.productions[action.value])))
         read.set(action.terminal);
-    if (lines) read.set(cfg.newline);
+    if (lines && !yields) read.set(cfg.newline);
     // What only its tests name is read too, but the parse reads its own.
     Bits named(nterms);
     for (const std::uint16_t terminal : state.named)
       if (!read.test(terminal)) named.set(terminal);
+    if (lines && yields && !read.test(cfg.newline)) named.set(cfg.newline);
     for (const std::uint16_t terminal : state.follow) {
       read.set(terminal);
       named.reset(terminal);
@@ -1318,7 +1338,7 @@ void mode_wins(const Cfg& cfg, const LexDfa& dfa,
         const std::size_t k = chain[at];
         const LexAccept& a = read[k];
         const bool named = out.modeNamed[mode].test(a.term);
-        const bool cuts = k == 0 && beside[a.term] && !named;
+        const bool cuts = beside[a.term] && !named;
         const bool literal = a.literal && out.mixed[a.term];
         if (a.guard == LexTest::none && a.back == 0 && !cuts && !named && !literal) {
           win = a.term;
@@ -1906,10 +1926,10 @@ void prefix_predictions(PrefixPredictions& out, const Cfg& cfg, const Packed& p,
     std::uint32_t state, std::uint32_t cell, std::span<const PackedAction> actions, bool tied) {
   constexpr std::size_t kWalkSteps = 32;
   // A cell whose last action reads the token again is told by the token in
-  // hand; the others read the next token in a mode, whose reader sees no
-  // indentation, which may stand before any token.
+  // hand; the others read the next token in a mode, whose reader sees neither
+  // indentation nor a trivia's line end, which may stand before any token.
   const bool rereads = actions.back().kind == PackedAction::Kind::reread;
-  if (!rereads && (cfg.indent != 0 || cfg.dedent != 0)) return;
+  if (!rereads && (cfg.indent != 0 || cfg.dedent != 0 || !cfg.newlineIn.empty())) return;
   const auto terminal = actions.front().terminal;
   if (terminal == kEndOfInput) return;
   if (out.cache.tied.empty()) {

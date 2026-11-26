@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <set>
 #include <span>
 #include <string_view>
 #include <unordered_map>
@@ -32,10 +31,11 @@ namespace {
 
 constexpr std::uint32_t kNoLink = 0xFFFFFFFFu;
 constexpr std::uint32_t kNoReading = 0xFFFFFFFFu;
-constexpr TextOffset kReachAll = 0xFFFFFFFFu;
 
-// What an insertion or a deletion costs.
+// What an insertion or a deletion costs, and a deletion that goes on a run of
+// dropped tokens that meant nothing, such as stray punctuation.
 constexpr std::uint32_t kEditCost = 8;
+constexpr std::uint32_t kSpanCost = 2;
 // The bytes of a walk, or the frames of a stack, one unit of work pays for.
 constexpr std::uint64_t kWorkBytes = 32;
 // A stack no tokens complete.
@@ -46,8 +46,9 @@ constexpr std::uint64_t kWorkFloor = std::uint64_t{1} << 16;
 constexpr std::uint64_t kWorkPerByte = 64;
 constexpr std::uint64_t kWorkPerParse = std::uint64_t{1} << 21;
 constexpr std::uint64_t kWorkPerSearch = std::uint64_t{1} << 19;
-// The tokens a race between goals of one cost may read.
-constexpr std::uint32_t kRaceSteps = 1024;
+// The tokens a search reads past where it set out before it weighs its
+// readings: one refused on the way repairs there the fault it met.
+constexpr std::uint32_t kHorizon = 1024;
 // The tokens before the one refused a search looks back over for a keyword
 // misspelt, and the rank of its readings: behind the edits of that token.
 constexpr unsigned kBackTokens = 8;
@@ -122,8 +123,15 @@ struct Candidate : Reading {
   std::uint32_t edits = 0;
   std::uint32_t faults = 0;
   std::uint32_t invented = 0;
-  // The author's tokens it read since the search set out.
+  // The author's tokens it read since the search set out, and once it
+  // validated, those it reads on to.
   std::uint32_t tokens = 0;
+  std::uint32_t until = 0;
+  // A goal refused on its way where a word it read may be a keyword misspelt,
+  // which a search set back reads: the least edit it then owes.
+  std::uint32_t owed = 0;
+  // On its way to the horizon, the last token it read.
+  Token last{nullptr, 0};
   // Where the text was read up to at the refusal it repairs: it validates
   // on the tokens past it.
   TextOffset past = 0;
@@ -209,8 +217,8 @@ struct Parting {
 };
 
 // The ends an unclosed token's readings may stop at, found one at a time:
-// each line end where it spans several lines, each place that cuts no word
-// where it ends with its line, else its own end.
+// line ends twice as many lines on each time where it spans several lines,
+// each place that cuts no word where it ends with its line, else its own end.
 struct Ends {
   enum Regime : std::uint8_t { none, lines, line, last };
   std::vector<TextOffset> found;
@@ -229,8 +237,8 @@ struct Fault {
   ElementId first = kNoElement;
   ElementId read = kNoElement;
   ElementId resume = kNoElement;
-  // Where the text was read up to when the fault opened: an insertion's
-  // caret.
+  // Where the text was read up to when the fault opened, or the token in hand
+  // where no token was read: an insertion's caret.
   TextOffset point = 0;
   // The author's bytes the fault takes.
   TextOffset begin = 0;
@@ -321,7 +329,7 @@ class Repair {
   [[nodiscard]] bool misspelt(Word word);
   void misread(std::uint32_t at, std::uint32_t read);
   bool start();
-  std::uint32_t run(bool& exhausted, bool& raced);
+  std::uint32_t run(bool& exhausted);
   void expand(std::uint32_t at);
   bool insertions(std::uint32_t from, std::uint32_t rank, bool required);
   bool reread(std::uint32_t from, Edit edit, std::uint32_t cost);
@@ -345,6 +353,20 @@ class Repair {
   }
   const std::vector<Typo>& typos_at(std::uint32_t state, TextOffset at);
   [[nodiscard]] bool rereads(const Candidate& r);
+  // Whether reading `at` last dropped a token that meant nothing, with no
+  // token read since: the next such one goes on the same run.
+  [[nodiscard]] bool spans(std::uint32_t at) {
+    return _links[at].kind == Edit::del && !_readings[at].fresh &&
+           !meant(_links[at].state, _links[at].tok);
+  }
+  // Whether token `tok` in state `state` carries what the author meant: a word,
+  // or text the fault mode reads as a named terminal.
+  [[nodiscard]] bool meant(std::uint32_t state, Token tok) {
+    if (m.word_at(m.src + tok.begin(m))) return true;
+    const Token whole = tok.terminal() < t.terminalCount
+        ? tok : mode_token(t.modeFault[t.stateMode[state]], tok.begin(m));
+    return whole.terminal() < t.terminalCount && (m.rank(whole) & 1) != 0;
+  }
   std::uint32_t child(std::uint32_t from, Edit edit);
   [[nodiscard]] std::pair<std::uint32_t, std::uint32_t> split_at(const Candidate& r);
   void forks(std::uint32_t at);
@@ -357,14 +379,12 @@ class Repair {
              std::uint32_t rank = 0);
   [[nodiscard]] Parting part(std::uint32_t a, std::uint32_t b) const;
   std::uint32_t completion(std::uint32_t node, std::uint16_t symbol = KernelCost::kNone);
-  void refused_at_end(std::uint32_t at);
   [[nodiscard]] bool before(const Parting& p) const;
   void tie(std::uint32_t kept, std::uint32_t dropped, const Parting& p, bool handed);
   void own(std::uint32_t from, std::uint32_t shared, std::vector<ElementId>& out) const;
   void add_name(std::uint32_t path, ElementId term);
   void name(std::uint32_t path);
-  std::uint32_t elect(bool& raced);
-  bool race(std::vector<TextOffset>& reach);
+  std::uint32_t elect(bool& bounded);
   [[nodiscard]] TextOffset deleted_end(std::uint32_t state, Token tok);
   // A reading past an indent dropped, at a level that closes with no
   // dedent, or past a dedent dropped.
@@ -451,12 +471,21 @@ class Repair {
   std::vector<Entry> _heap;
   std::uint32_t _seq = 0;
   std::unordered_map<Future, std::uint32_t, FutureHash> _seen;
+  // Per future a reading passed on its way to the horizon, the one that did.
+  std::unordered_map<Future, std::uint32_t, FutureHash> _passed;
+  // Per token shifted past an edit, the least cost a reading shifted it at.
+  std::unordered_map<TextOffset, std::uint32_t> _shifted;
+  // A reading that met one as cheap on its way to the horizon, and that one.
+  std::unordered_map<std::uint32_t, std::uint32_t> _joined;
   // The goals of the least cost.
   std::vector<std::uint32_t> _goals;
   // Per link, the first terminals written by the paths dropped for one as
   // cheap that goes through it; and what the elected path's first could as
   // cheaply have been.
   std::unordered_map<std::uint32_t, std::vector<ElementId>> _under;
+  // Per first edit of a later fault of the path, what its first written
+  // terminal could as cheaply have been.
+  std::unordered_map<std::uint32_t, std::vector<ElementId>> _alsoOf;
   std::vector<ElementId> _also;
   std::unordered_set<std::uint64_t> _named;
   // Per mode and place, the misspellings the text there reads as; and those
@@ -570,16 +599,6 @@ std::uint32_t Repair::completion(std::uint32_t node, std::uint16_t symbol) {
   return _completions.at(key(node, symbol));
 }
 
-// A reading that reaches the end of the text validates only once accepted,
-// whatever it read before: where the end refuses it right past its tokens, it
-// stands there and closes what it opened, as the readings it races do.
-void Repair::refused_at_end(std::uint32_t at) {
-  Candidate ahead = _readings[at];
-  if (step(ahead) != Exit::refused || ahead.tok.terminal() != kEndOfInput) return;
-  ahead.shifts = 0;
-  _readings[at] = ahead;
-}
-
 // Where paths `a` and `b` part, read from the root down.
 Parting Repair::part(std::uint32_t a, std::uint32_t b) const {
   std::uint32_t x = a, y = b;
@@ -622,7 +641,10 @@ void Repair::tie(std::uint32_t kept, std::uint32_t dropped, const Parting& p, bo
   std::vector<ElementId> moved;
   own(dropped, p.shared, moved);
   if (handed) own(kept, p.shared, moved);
-  for (const ElementId term : moved) add_name(kept, term);
+  // Under the kept path's link where the two part: the fault they differ at.
+  std::uint32_t under = handed ? p.a : p.b;
+  if (under == kNoLink || under == dropped) under = kept;
+  for (const ElementId term : moved) add_name(under, term);
   _work += moved.size();
 }
 
@@ -631,11 +653,25 @@ void Repair::add_name(std::uint32_t path, ElementId term) {
     (path == kNoLink ? _also : _under[path]).push_back(term);
 }
 
-// Collect the path's first written terminal and the alternatives its links hold.
+// Collect the alternatives the path's links hold, each for the fault its link
+// is of: the first fault's for its note, the others' under their first edit.
 void Repair::name(std::uint32_t path) {
-  for (std::uint32_t l = path; _links[l].parent != kNoLink; l = _links[l].parent)
-    if (const auto held = _under.find(l); held != _under.end())
-      for (const ElementId term : held->second) add_name(kNoLink, term);
+  std::vector<ElementId> held;
+  std::uint32_t first = kNoLink;
+  for (std::uint32_t l = path; _links[l].parent != kNoLink; l = _links[l].parent) {
+    if (const auto under = _under.find(l); under != _under.end())
+      held.insert(held.end(), under->second.begin(), under->second.end());
+    if (!_links[l].opens) continue;
+    auto& fault = _alsoOf[l];
+    fault.insert(fault.end(), held.begin(), held.end());
+    held.clear();
+    first = l;
+  }
+  if (const auto fault = _alsoOf.find(first); fault != _alsoOf.end()) {
+    held.insert(held.end(), fault->second.begin(), fault->second.end());
+    _alsoOf.erase(fault);
+  }
+  for (const ElementId term : held) add_name(kNoLink, term);
 }
 
 // Whether reading `at` dies to `kept`, the one its future keeps: at a worse
@@ -671,13 +707,15 @@ void Repair::admit(std::uint32_t at, Work work) {
     const Candidate& r = _readings[at];
     const auto [it, fresh] = _seen.try_emplace(future(r), at);
     if (fresh || !merge(at, it->second)) {
-      const auto more = work == Work::read && !r.goal() && r.freeInserts == 0 ? kRereadCost : 0;
+      const auto more = work != Work::read || r.goal() || r.freeInserts != 0 ? 0
+                        : spans(at) ? kSpanCost : kRereadCost;
       queue(r.cost + more, r, at, work);
       return;
     }
   }
-  // The readings made of the words it read stand without it.
-  if (at + 1 == _readings.size()) discard(at);
+  // The readings made of the words it read stand without it; one that read
+  // on to the horizon stands for the futures it passed.
+  if (at + 1 == _readings.size() && _readings[at].until == 0) discard(at);
 }
 
 // The reading of `from` with `term` put in hand before its token.
@@ -704,11 +742,11 @@ std::uint32_t Repair::child(std::uint32_t from, Edit edit) {
     r.resume = edit.resume;
   } else {
     edit.opens = r.fresh;
-    if (r.edits == 0 && writes(edit)) add_name(at, edit.term);
+    if ((r.edits == 0 || edit.opens) && writes(edit)) add_name(at, edit.term);
     r.faults += r.fresh;
     ++r.edits;
     r.fresh = r.due = false;
-    r.shifts = 0;
+    r.until = r.shifts = 0;
   }
   _links.push_back(edit);
   r.gone = false;
@@ -782,6 +820,10 @@ Exit Repair::step(Candidate& r, Token* taken) {
       ++r.shifts;
     r.pin = Pin::none;
     ++r.tokens;
+    if (r.edits != 0) {
+      const auto [it, fresh] = _shifted.try_emplace(x.taken.begin(m), r.cost);
+      if (!fresh) it->second = std::min(it->second, r.cost);
+    }
     r.fresh = true;
     r.phase = Phase::beforeEdit;
     r.freeInserts = 0;
@@ -800,7 +842,7 @@ Work Repair::read(std::uint32_t at) {
   Token taken{nullptr, 0};
   for (std::uint32_t read = 0;; ++read) {
     Candidate& r = _readings[at];
-    if (r.done || (r.pin == Pin::none && r.goal())) return Work::read;
+    if (r.done || (r.pin == Pin::none && r.goal() && r.tokens >= r.until)) return Work::read;
     if (spent()) return Work::none;
     if (plain) before = r;
     const Exit exit = step(r, &taken);
@@ -814,7 +856,30 @@ Work Repair::read(std::uint32_t at) {
         _looked.push_back({before, word, read});
       }
     }
-    if (!r.held) continue;
+    if (!r.held) {
+      // On its way to the horizon, it stops where a cheaper reading passed
+      // with the same future, and else stands for that future.
+      if (r.until != 0) {
+        r.last = taken;
+        const auto [it, fresh] = _passed.try_emplace(future(r), at);
+        if (!fresh && it->second != at) {
+          const Candidate& x = _readings[it->second];
+          const auto c = cost_order(r.cost, r, x.cost, x);
+          if (c > 0) return Work::none;
+          if (c == 0) {
+            // As cheap, it joins the reading that reads on for both, which
+            // takes what its first terminal could have been.
+            std::uint32_t kept = it->second;
+            for (auto j = _joined.find(kept); j != _joined.end(); j = _joined.find(kept)) kept = j->second;
+            tie(kept, at, part(at, kept), false);
+            _joined.emplace(at, kept);
+            return Work::none;
+          }
+          it->second = at;
+        }
+      }
+      continue;
+    }
     if (plain) misread(at, read);
     return exit == Exit::refused ? Work::read : Work::fork;
   }
@@ -1118,7 +1183,8 @@ bool Repair::more_ends(Ends& ends, TextOffset p, const Unclosed& reading) {
         : reading.end < offset(m.end) && eol(reading.end) ? Ends::line : Ends::last;
     if (regime == Ends::line) x = p + 1;
   } else if (regime == Ends::lines) {
-    x = until(x, eol);
+    std::uint64_t skip = (std::uint64_t{1} << (ends.found.size() - 1)) - 1;
+    x = until(x, [&](TextOffset i) { return eol(i) && skip-- == 0; });
   }
   if (regime == Ends::line) x = until(x, [&](TextOffset i) { return !cuts(i); });
   charge(work);
@@ -1246,7 +1312,7 @@ void Repair::expand(std::uint32_t at) {
     if (m.src + end > r.at) r.at = m.src + end;
     r.held = false;
     r.resume = 2 * _stacks.state(r.node);
-    r.cost += kEditCost;
+    r.cost += spans(at) && !meant(state, b.tok) ? kSpanCost : kEditCost;
     r.lost += 1;
     r.phase = Phase::discardOnly;
     r.freeInserts = 0;
@@ -1347,6 +1413,9 @@ bool Repair::start() {
   _links.clear();
   _heap.clear();
   _seen.clear();
+  _passed.clear();
+  _shifted.clear();
+  _joined.clear();
   _typos.clear();
   _unclosed.clear();
   _completions.clear();
@@ -1355,6 +1424,7 @@ bool Repair::start() {
   _ends.clear();
   _goals.clear();
   _under.clear();
+  _alsoOf.clear();
   _named.clear();
   _also.clear();
   _plan.clear();
@@ -1398,10 +1468,10 @@ bool Repair::start() {
 
 // The reading elected: a goal of the least cost, or with none before the
 // work ran out, the one that went past the most of the author's tokens.
-std::uint32_t Repair::run(bool& exhausted, bool& raced) {
+std::uint32_t Repair::run(bool& exhausted) {
   std::uint32_t furthest = kNoReading;
   std::uint64_t most = 0;
-  Candidate best;
+  std::uint32_t least = ~std::uint32_t{0};
   exhausted = false;
   while (!_heap.empty()) {
     throwIfCancelled(m.stop);
@@ -1409,21 +1479,11 @@ std::uint32_t Repair::run(bool& exhausted, bool& raced) {
     const Entry e = _heap.back();
     _heap.pop_back();
     if ((e.work == Work::read || e.work == Work::fork) && _readings[e.at].gone) continue;
-    if (!_goals.empty() && e.f > _readings[_goals[0]].cost) break;
-    // Advance a validated repair while comparing more expensive edits. Once it
-    // reaches EOF, only candidates that can win or name an equal-cost edit matter.
-    if (best.node != kNoStack && key_order(e.f, e, best.cost, best) > 0 &&
-        cost_order(e.f, e, best.cost, best) > 0) {
-      if (best.done) continue;
-      // A token further on, the splits on the way decided as any step decides them.
-      Candidate ahead = best;
-      const Exit exit = step(ahead);
-      if (exit == Exit::accepted) {
-        best.done = true;
-        continue;
-      }
-      if (exit == Exit::shifted) best.reading() = ahead.reading();
-      else best.node = kNoStack;
+    if (!_goals.empty()) {
+      const Candidate& first = _readings[_goals[0]];
+      if (e.f > least) break;
+      // Past the first goal, only a reading as cheap names an edit.
+      if (e.f == least && cost_order(e.f, e, first.cost, first) > 0) continue;
     }
     if (spent()) {
       exhausted = true;
@@ -1441,130 +1501,69 @@ std::uint32_t Repair::run(bool& exhausted, bool& raced) {
       replacement(e.at, e.rank);
       continue;
     }
-    if (_readings[e.at].goal() && !_readings[e.at].done) refused_at_end(e.at);
     const Candidate& x = _readings[e.at];
-    if (x.goal()) {
-      if (best.node == kNoStack || (x.done != best.done ? x.done : key_order(x.cost, x, best.cost, best) < 0))
-        best = x;
-      _goals.push_back(e.at);
-      continue;
-    }
     if (const std::uint64_t went = std::uint64_t{x.tokens} + x.lost;
         furthest == kNoReading ||
         std::pair{went, x.at} > std::pair{most, _readings[furthest].at}) {
       furthest = e.at;
       most = went;
     }
+    // A reading validated reads on to the horizon, where it is a goal. Refused
+    // on the way, it is repaired there, unless it read a word a search set back
+    // reads as a keyword misspelt.
+    if (x.goal() && (!x.held || (x.last.end != nullptr &&
+                                 misspelt({x.last.begin(m), offset(x.last.end)})))) {
+      if (!x.done && !x.held && x.tokens < kHorizon) {
+        _readings[e.at].until = kHorizon;
+        admit(e.at, read(e.at));
+        continue;
+      }
+      Candidate& g = _readings[e.at];
+      if (g.held) g.owed = rereads(g) ? kRereadCost : kEditCost;
+      least = std::min(least, g.cost + g.owed);
+      _goals.push_back(e.at);
+      continue;
+    }
+    // Refused at a token a reading two edits cheaper read past an edit.
+    if (const auto it = _shifted.find(x.tok.begin(m));
+        it != _shifted.end() && it->second + 2 * kEditCost <= x.cost)
+      continue;
     // Queued as if a re-reading went on from it: with none, it costs a whole
     // edit.
-    if (x.freeInserts == 0 && e.f < x.cost + kEditCost && !rereads(x)) {
+    if (x.freeInserts == 0 && e.f < x.cost + kEditCost && !rereads(x) && !spans(e.at)) {
       queue(x.cost + kEditCost, x, e.at, Work::read);
       continue;
     }
     expand(e.at);
   }
   exhausted = exhausted || spent();
-  return _goals.empty() ? furthest : elect(raced);
+  return _goals.empty() ? furthest : elect(exhausted);
 }
 
-// The goals read on with no edit, the one furthest back first, until all
-// that are left are of one set of goals or the race's steps pass: `reach[k]`
-// is where goal `k`'s furthest reading was refused. True when a work limit
-// stops readings that still disagree.
-bool Repair::race(std::vector<TextOffset>& reach) {
-  struct Runner { Candidate reading; std::set<std::uint32_t> goals; };
-  std::vector<Runner> runners;
-  std::vector<std::uint32_t> racing;
-  const auto behind = [&](std::uint32_t a, std::uint32_t b) {
-    return runners[a].reading.at > runners[b].reading.at;
-  };
-  const auto enqueue = [&](std::uint32_t i) {
-    racing.push_back(i);
-    std::ranges::push_heap(racing, behind);
-  };
-  std::ranges::fill(reach, 0);
-  for (std::uint32_t g = 0; g < _goals.size(); ++g) {
-    if (_readings[_goals[g]].done) {
-      reach[g] = kReachAll;
-      continue;
-    }
-    runners.push_back({_readings[_goals[g]], {g}});
-    enqueue(static_cast<std::uint32_t>(runners.size() - 1));
-  }
-  const auto reach_all = [&](std::uint32_t i) {
-    for (const std::uint32_t k : runners[i].goals) reach[k] = kReachAll;
-  };
-  // Whether what races is of one set of goals no other can reach.
-  const auto level = [&] {
-    const auto& first = runners[racing[0]].goals;
-    const char* least = m.end;
-    for (const std::uint32_t q : racing) {
-      if (runners[q].goals != first) return false;
-      least = std::min(least, runners[q].reading.at);
-    }
-    for (std::uint32_t k = 0; k < reach.size(); ++k)
-      if (!first.contains(k) && reach[k] >= offset(least)) return false;
-    return true;
-  };
-  std::unordered_map<Future, std::uint32_t, FutureHash> waiting;
-  for (std::uint32_t steps = 0; !racing.empty(); ++steps) {
-    throwIfCancelled(m.stop);
-    if (const bool decided = level(); decided || steps >= kRaceSteps || spent()) {
-      for (const std::uint32_t q : racing) reach_all(q);
-      return !decided;
-    }
-    std::ranges::pop_heap(racing, behind);
-    const std::uint32_t i = racing.back();
-    racing.pop_back();
-    if (const auto it = waiting.find(future(runners[i].reading)); it != waiting.end() && it->second == i)
-      waiting.erase(it);
-    switch (step(runners[i].reading)) {
-      case Exit::refused:
-      case Exit::split:
-        for (const std::uint32_t k : runners[i].goals)
-          reach[k] = std::max(reach[k], runners[i].reading.tok.begin(m));
-        break;
-      case Exit::accepted:
-        reach_all(i);
-        break;
-      default:
-        // Readings that meet past a token race as one.
-        if (const std::uint32_t kept = waiting.try_emplace(future(runners[i].reading), i).first->second;
-            kept != i) {
-          auto& goals = runners[kept].goals;
-          auto joining = std::move(runners[i].goals);
-          if (goals.size() < joining.size()) goals.swap(joining);
-          goals.merge(joining);
-        } else {
-          enqueue(i);
-        }
-    }
-  }
-  return false;
-}
-
-// The goal that reads furthest, then of the least key, then of the first
-// rank.
-std::uint32_t Repair::elect(bool& raced) {
-  std::vector<TextOffset> reach(_goals.size(), kReachAll);
-  if (reach.size() > 1) raced = race(reach);
+// The goal of the least cost with what it owes, then of the least key, then
+// of the first rank; `bounded` where the horizon decided between two as cheap.
+std::uint32_t Repair::elect(bool& bounded) {
   std::size_t won = 0;
   for (std::size_t g = 1; g < _goals.size(); ++g) {
     const Candidate& a = _readings[_goals[g]];
     const Candidate& b = _readings[_goals[won]];
-    if (reach[g] != reach[won]) {
-      if (reach[g] > reach[won]) won = g;
+    if (a.cost + a.owed != b.cost + b.owed || a.owed != b.owed) {
+      if (a.cost + a.owed != b.cost + b.owed ? a.cost + a.owed < b.cost + b.owed : a.owed < b.owed) won = g;
       continue;
     }
     const auto k = key_order(a.cost, a, b.cost, b);
     if (k != 0 ? k < 0 : before(part(_goals[g], _goals[won]))) won = g;
   }
-  // What reads as far as the winner, as cheaply, names what its first written
+  // What reads as cheaply as the winner names what its first written
   // terminal could have been.
   for (std::size_t g = 0; g < _goals.size(); ++g) {
     const Candidate& a = _readings[_goals[g]];
     const Candidate& b = _readings[_goals[won]];
-    if (reach[g] == reach[won] && cost_order(a.cost, a, b.cost, b) == 0) name(_goals[g]);
+    if (a.owed == b.owed && cost_order(a.cost, a, b.cost, b) == 0) {
+      name(_goals[g]);
+      // Two as cheap that never met: the horizon decided between them.
+      bounded = bounded || (g != won && !b.done && b.owed == 0);
+    }
   }
   return _goals[won];
 }
@@ -1584,6 +1583,11 @@ void Repair::plan_path(std::uint32_t reading) {
     if (edit.kind == Edit::arm) continue;
     first = writes(edit) ? edit.term : kNoElement;
     closes = edit.opens;
+    if (const auto fault = _alsoOf.find(reading); fault != _alsoOf.end()) {
+      std::erase(fault->second, first);
+      std::ranges::sort(fault->second, {}, [&](ElementId term) { return t.terminalOrder[term]; });
+      fault->second.erase(std::ranges::unique(fault->second).begin(), fault->second.end());
+    }
   }
   // What its first written terminal could as cheaply have been, in the
   // grammar's order.
@@ -1722,10 +1726,14 @@ bool Repair::write(const Step& st) {
     return true;
   }
   Fault& f = _fault;
-  if (st.edit.opens) note();
+  if (st.edit.opens) {
+    note();
+    const auto link = static_cast<std::uint32_t>(&st.edit - _links.data());
+    if (const auto fault = _alsoOf.find(link); fault != _alsoOf.end()) _also = std::move(fault->second);
+  }
   if (!f.open) {
     f.open = true;
-    f.point = offset(m.at);
+    f.point = m.at != m.src ? offset(m.at) : m.tok.begin(m);
     f.begin = f.end = m.tok.begin(m);
   }
   // The first edit that takes bytes says where the fault begins.
@@ -1897,9 +1905,8 @@ bool Repair::pause() {
   m.plan.clear();
   m.planned = 0;
   bool exhausted = false;
-  bool raced = false;
-  const std::uint32_t elected = run(exhausted, raced);
-  return take(elected, exhausted || raced);
+  const std::uint32_t elected = run(exhausted);
+  return take(elected, exhausted);
 }
 
 // The states read on. Text skipped is written before the next token, which

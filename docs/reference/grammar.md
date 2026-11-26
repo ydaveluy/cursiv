@@ -679,8 +679,10 @@ text**: a tab is never expanded to spaces.
 - The end of input closes every level.
 
 `using indent_newline = NEWLINE;` names the terminal that ends a statement.
-Blank lines, form feeds included, and comment-only lines do not change levels
-when `NEWLINE` reads them.
+Blank lines, form feeds included, keep the current level. So does a
+comment-only line when `NEWLINE` reads it after a line ending, or when the
+grammar expects no `indent` or `dedent` there and the line's first token ends
+the line, as a comment before the first statement does.
 `indent_open` and `indent_close` name the brackets inside which indentation
 is ignored and line endings are blanks, to `NEWLINE` and to `gap::line`
 alike: a spelling, a choice of spellings, or a terminal. Inside an

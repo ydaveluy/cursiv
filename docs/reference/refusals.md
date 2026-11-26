@@ -130,7 +130,7 @@ for examples.
 | `the terminals are too large for one lexer`, `the terminals need more than 65534 lexer states`, `the terminals end in too many ways for one lexer`, `the automaton has too many transitions` | Simplify overlapping terminal patterns or move choices between tokens into rules. |
 | `the terminals start in too many ways for one lexer` | Reuse terminal definitions and reduce the literals and keywords that begin with different text. |
 | `the grammar has too many ties of terminals` | Reduce the terminals that can read the same text in one place. |
-| `the grammar takes too many kinds of steps`, `the grammar takes too many unit reductions`, `a rule is called from too many kinds of places`, `a state has too many actions on one token` | The parser tables are full. Lower the [state limit](cmake.md#cursiv_generate_language), or merge rules that differ only in the node they build. |
+| `the grammar has too many kernels`, `the grammar takes too many kinds of steps`, `the grammar takes too many unit reductions`, `a rule is called from too many kinds of places`, `a state has too many actions on one token` | The parser tables are full. Lower the [state limit](cmake.md#cursiv_generate_language), or merge rules that differ only in the node they build. |
 | `the grammar has too many records`, `the grammar publishes too many actions`, `the grammar names too many members and rules`, `the grammar names too many AST classes or members` | The grammar holds more rules, properties or directives than the tables can number; a grammar publishes at most 16384 actions. Factor repeated directives into named rules. |
 | `a reference narrows to too many classes` | Narrow the target types of the reference, or give them a common base. |
 

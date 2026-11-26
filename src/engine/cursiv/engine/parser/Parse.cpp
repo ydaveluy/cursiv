@@ -198,11 +198,11 @@ Token Machine::line_in_trivia(const char* p, Token tok, std::uint32_t state, Ind
     const Token x = walk(q, mode, 1, q);
     if (x.end <= q) break;
     if (t.inSet(t.newlineIn, x.terminal()) && line_between(q, x.end, at)) {
-      // The trivia's line end, moved to the gap's last byte: what the state
-      // reads there, the line terminal's own guard deciding.
+      // The trivia's line end, moved to the gap's last byte: the terminal the
+      // state reads there where it reads that line end alone, its guard deciding.
       const Token line = walk(next - 1, mode, t.transition(1, t.byteClass['\n']), next);
       const std::uint16_t as = line.terminal();
-      return as < t.terminalCount && t.terminalTrivia[as] == Trivia::none &&
+      return line.end == next && as < t.terminalCount && t.terminalTrivia[as] == Trivia::none &&
                      t.inSet(t.followOf[state], as)
                  ? token(tok.begin(*this), next, as)
                  : tok;
@@ -261,10 +261,20 @@ Token Machine::indentation(const char* p, Indented& at) {
   return fault;
 }
 
+bool Machine::first_ends_line(const char* p, std::uint16_t mode) {
+  for (const char* q = p;;) {
+    const Token x = walk(q, mode, 1, q);
+    if (x.end <= q || x.terminal() >= t.terminalCount) return false;
+    if (t.terminalTrivia[x.terminal()] == Trivia::none) return line_start(x.end);
+    q = x.end;
+  }
+}
+
 bool Machine::gap_reads(std::uint32_t monitor, const char* from, const char* to,
                         bool whole) const {
-  // One pass: the monitor of a part reads on from wherever a part begins.
-  // The gap's end ends its last character, as the end of input does.
+  // One pass: the monitor of a part reads on from wherever a part begins, and
+  // a part may end before the gap's last byte; the whole ends with the gap's
+  // last character, as at the end of input.
   const TextMonitor& m = t.monitors[monitor];
   std::uint32_t state = 1;
   while (from != to) {
@@ -275,7 +285,7 @@ bool Machine::gap_reads(std::uint32_t monitor, const char* from, const char* to,
       if (state == 0) return false;
     }
   }
-  return (m.flags[state] & 2) != 0;
+  return (m.flags[state] & (whole ? 2 : 3)) != 0;
 }
 
 bool Machine::settles(std::uint32_t list, const char* p, LexWork* work) {
@@ -410,26 +420,27 @@ void Machine::watch(const char* at) {
 
 const char* Machine::run_on(std::uint32_t run, const char* p) {
   const std::uint8_t* const in = t.runSets + run * 256u;
-  const auto begin = static_cast<TextOffset>(p - src);
-  std::uint64_t place = stretch_place(kNoToken, run, begin);
-  if (auto it = stretches.upper_bound(place); it != stretches.begin()) {
-    --it;
-    if ((it->first >> 32) == (place >> 32) && begin <= it->second.end) {
-      place = it->first;
-      p = std::min(end, src + it->second.end);
-      if (p >= mark) watch(p);
-      if (p == end || in[byte_at(p)] == 0) return p;
-    }
-  }
+  std::uint64_t place = stretch_place(kNoToken, run, static_cast<TextOffset>(p - src));
+  auto it = stretches.upper_bound(place);
+  if (it != stretches.begin() && (std::prev(it)->first >> 32) == (place >> 32) &&
+      std::prev(it)->second.end >= static_cast<TextOffset>(place))
+    place = (--it)->first;
   for (;;) {
-    const char* const until = p < mark ? mark : p;
+    if (p >= mark) watch(p);
+    const bool known = it != stretches.end() && (it->first >> 32) == (place >> 32);
+    const char* const next = known ? src + static_cast<TextOffset>(it->first) : end;
+    if (known && next <= p) {
+      p = std::max(p, std::min(end, src + it->second.end));
+      it = it->first == place ? std::next(it) : stretches.erase(it);
+      continue;
+    }
+    const char* const until = std::min(mark, next);
     p = t.runScanners[run](in, p, until);
     if (p < until || p == end) {
-      if (p - src - begin >= kQuietSpan)
+      if (p - src - static_cast<TextOffset>(place) >= kQuietSpan)
         stretches.insert_or_assign(place, Stretch{static_cast<TextOffset>(p - src)});
       return p;
     }
-    watch(p);
   }
 }
 

@@ -110,9 +110,13 @@ struct G : cursiv::GrammarSpec {
     return t == "priv" ? Vis::priv : Vis::pub;
   };
   struct VIS : terminal<as<vis_conv>(some(cr<"a-z">))> {};
+  // A terminal that reads another reads its word in any case too.
+  struct PRIV : terminal<ikw<"priv">> {};
+  struct ALIAS : terminal<ref<PRIV>> {};
   struct Root
       : rule<(assign<&Decl::vis>(ref<VIS>) + assign<&Decl::name>(ref<ID>)) |
-             (kw<"refl"> + assign<&Decl::vis>(ref<ID>))> {};
+             (kw<"refl"> + assign<&Decl::vis>(ref<ID>)) |
+             (kw<"alias"> + assign<&Decl::vis>(ref<ALIAS>))> {};
   using entry = Root;
   using ignored = WS;
 };

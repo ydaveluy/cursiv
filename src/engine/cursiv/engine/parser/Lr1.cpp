@@ -1071,7 +1071,8 @@ void split_leads(Cfg& cfg) {
     return nonterminal(made);
   };
   // A nullable prefix has two forms: it read a token, or it stayed empty.
-  // Each pair extends the preceding pair by one symbol.
+  // Each pair extends the preceding pair by one symbol and keeps the scopes
+  // and takes of the symbols it reads.
   const auto ways = [&](const Production& p, bool blank, auto&& each) {
     const auto& rhs = p.rhs;
     Symbol read = kNone, skipped = kNone;
@@ -1094,6 +1095,7 @@ void split_leads(Cfg& cfg) {
         pair.region = p.region;
         pair.prefixTurn = p.prefixTurn;
         if (!p.scopes.empty()) pair.scopes = {p.scope_at(0), p.scope_at(i)};
+        if (!p.takes.empty()) pair.takes = {i == 1 ? p.takes[0] : kNone, p.takes[i]};
         return lhs;
       };
       Symbol next = kNone;
@@ -1117,9 +1119,11 @@ void split_leads(Cfg& cfg) {
       if (blank) finish(skipped, copy(rhs[i], false));
     }
   };
-  // The symbols folded into the pair go; the rest keep their scopes and takes.
+  // The symbols folded into the pair go and the pair itself takes nothing;
+  // the rest keep their scopes and takes.
   const auto replace = [](Production& p, std::vector<Symbol> rhs, std::size_t folded) {
     p.erase(1, folded);
+    if (folded != 0 && !p.takes.empty()) p.takes[0] = kNone;
     p.rhs = std::move(rhs);
   };
   // A production that tests its scope's end reads that end after its symbols.

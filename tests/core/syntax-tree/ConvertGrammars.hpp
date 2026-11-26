@@ -201,6 +201,8 @@ struct Doc : cursiv::Extends<cursiv::AstNode> {
   string_view raw;
   string decoded;
   Boxed boxed;
+  Boxed owned;
+  variant<Boxed, int64> tagged{int64{0}};
   optional<Ident> first;
   vector<Ident> rest;
   vector<variant<int64, string>> mixed;
@@ -427,6 +429,7 @@ struct G : cursiv::GrammarSpec {
   struct Decoded : rule<as<&chain::decode>(ref<QUOTED_RAW>)> {};
   struct TAG : terminal<as<&chain::tag>(lit<"@"> + some(cr<"a-z">))> {};
   struct PassedTag : rule<ref<TAG>> {};
+  struct Owned : rule<as<std::string>(kw<"owned">)> {};
   struct IDENT : terminal<as<&chain::ident>(lit<"$"> + some(cr<"a-z">))> {};
   struct MIXED : terminal<as<&chain::mixed>(lit<"#"> + some(cr<"a-z">))> {};
   struct ONLY : terminal<as<&chain::ident>(lit<"!"> + some(cr<"a-z">))> {};
@@ -444,6 +447,8 @@ struct G : cursiv::GrammarSpec {
             kw<"chain"> + assign<&chain::Doc::raw>(ref<QUOTED_RAW>) +
             assign<&chain::Doc::decoded>(ref<Decoded>) +
             option(assign<&chain::Doc::boxed>(ref<PassedTag>)) +
+            option(assign<&chain::Doc::owned>(ref<Owned>)) +
+            option(kw<"tagged"> + assign<&chain::Doc::tagged>(ref<PassedTag>)) +
             option(assign<&chain::Doc::first>(ref<IDENT>) +
                    many(append<&chain::Doc::rest>(ref<IDENT>))) +
             option(assign<&chain::Doc::mixed>(ref<MIXED>)) +

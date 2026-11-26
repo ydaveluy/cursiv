@@ -78,6 +78,32 @@ std::uint32_t GrammarImage::rule(const ImageRuleDesc& d) {
   return id;
 }
 
+ImageId GrammarImage::bare(ImageId id) {
+  const auto next = [&](ImageId at) {
+    const ImageNode& n = nodes[at];
+    if (n.kind == ImageKind::doc) return children[n.first];
+    if (n.kind == ImageKind::ref && stage(n.a).kind == ImageRuleKind::terminal)
+      return node(*stage(n.a).body, folds(n.a));
+    return at;
+  };
+  // A chain of more terminals than the grammar has turns back on itself: the
+  // call stays, for the compile to refuse. Each node of the chain then keeps
+  // where it ends.
+  ImageId end = id;
+  for (std::size_t calls = 0; calls <= rules.size(); ++calls) {
+    if (end < _bare.size() && _bare[end] != kNoImage) {
+      end = _bare[end];
+      break;
+    }
+    const ImageId to = next(end);
+    if (to == end) break;
+    end = to;
+  }
+  _bare.resize(nodes.size(), kNoImage);
+  for (ImageId at = id; at != end && _bare[at] == kNoImage; at = next(at)) _bare[at] = end;
+  return end;
+}
+
 bool GrammarImage::folds(std::uint32_t rule) const {
   const ImageRuleDesc* ownerGrammar = rules[rule]->ownerGrammar;
   return ownerGrammar != nullptr ? ownerGrammar->caseInsensitive
