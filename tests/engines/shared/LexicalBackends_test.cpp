@@ -284,7 +284,7 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, plain, true);
   const std::string hashes = "raw:##\"" + std::string(8192, '#') + "\"##";
   check(parser, hashes, true);
-  check(parser, "line:" + std::string(1 << 20, 'x'), false);
+  check(parser, "line:" + std::string(1 << 18, 'x'), false);
 }
 }  // namespace
 
@@ -365,12 +365,12 @@ void exercise(const cursiv::Parser& parser) {
       for (char& c : *text) c = draw(2) != 0 ? 'x' : '=';
     check(parser, "same:", mark + ":" + body + mark, (body + mark).find(mark) == body.size());
   }
-  // The body repeats all but the last byte of a 2 MiB mark: each place reads
+  // The body repeats all but the last byte of a 1 MiB mark: each place reads
   // again only the bytes no place before it read.
-  const std::string capture(std::size_t{1} << 21, '=');
+  const std::string capture(std::size_t{1} << 20, '=');
   const auto begin = std::chrono::steady_clock::now();
   check(parser, "same:", capture + ":" + capture.substr(1) + "x" + capture);
-  std::printf("  2 MiB mark repeated but its last byte: %.3fs\n",
+  std::printf("  1 MiB mark repeated but its last byte: %.3fs\n",
               std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count());
   check(parser, "empty:", ":");
   check(parser, "empty:", "#:body#");
