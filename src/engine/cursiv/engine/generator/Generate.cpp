@@ -755,7 +755,9 @@ int generate(GrammarImage& image, const LowerDesc& desc, const LanguageNames& na
       files.write(fs::path(dir) / name, text);
     };
     emit_drive(cfg, packed, names, write);
+    cfg.swapRecordInputs();
     write("Ast.cpp", {emit_ast(cfg, packed, ns, names.header, names.grammar)});
+    cfg.swapRecordInputs();
     write("Grammar.cpp", {grammar_facts(cfg, packed, ns)});
     write("GrammarSource.hpp", {grammar_source(names, dump, wrapped)});
     write("GRAMMAR.txt", {wrapped});

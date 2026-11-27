@@ -253,6 +253,61 @@ int main() {
     });
     CHECK(steps(levels.source(deep(16))) < 5 * steps(levels.source(deep(8))));
   }
+  {
+    const Entry split{"splitline:"};
+    tree<ast::Stated>(split, "a\nb", [](const ast::Stated& n) { return n.body.size() == 1; });
+    expect(split, "a b", false);
+  }
+  // A text behind a many opens before its first token the levels it closes:
+  // reading it costs its length, and a repair or a caret there comes to an end.
+  {
+    const Entry behind{"behind:"};
+    tree<ast::Stated>(behind, "c c a d d d", [](const ast::Stated& n) {
+      return n.body.size() == 3 && n.body[0]->name == "c" && n.body[1]->name == "c" &&
+             n.body[2]->body.size() == 1 && n.body[2]->body[0]->body.size() == 1 &&
+             n.body[2]->body[0]->body[0]->name == "a";
+    });
+    const auto closed = [&](int levels, std::string_view after = "") {
+      std::string text = "c a";
+      for (int i = 0; i < levels; ++i) text += " d";
+      text += after;
+      return behind.source(text);
+    };
+    CHECK(steps(closed(16)) < 3 * steps(closed(8)));
+    const auto extra = closed(2, " e");
+    const auto repaired = conformance_test::parser().parse(extra);
+    CHECK(repaired.accepted && repaired.diagnostics.size() == 1 &&
+          repaired.diagnostics[0].kind == cursiv::DiagnosticKind::Deleted &&
+          repaired.diagnostics[0].begin == extra.size() - 1 && repaired.diagnostics[0].end == extra.size());
+    const std::string source = behind.source("c a");
+    CHECK((caret_offers::offered(conformance_test::parser(), source,
+                                 static_cast<cursiv::TextOffset>(source.size())) ==
+           std::vector<std::string>{"d"}));
+  }
+  {
+    const Entry guarded{"blankprefix:"};
+    const std::string source = guarded.source(" a d d");
+    const auto result = conformance_test::parser().parse(source);
+    const auto* at = exactly<ast::Stated>(result);
+    CHECK(clean(result) && at);
+    for (int level = 0; level < 2 && at; ++level) {
+      CHECK(at->body.size() == 3);
+      if (at->body.size() != 3) break;
+      CHECK(!cursiv::ast_cast<ast::SecondPrefix>(at->body[0]) &&
+            cursiv::ast_cast<ast::SecondPrefix>(at->body[1]));
+      for (int i = 0; i < 2; ++i) {
+        const auto& prefix = result.cst()[at->body[i]->cstNodeId];
+        CHECK(prefix.begin == source.rfind('a') && prefix.end == prefix.begin &&
+              at->body[i]->cstNodeId < at->body[i + 1]->cstNodeId);
+      }
+      at = at->body[2];
+    }
+    CHECK(at && at->name == "a");
+    expect(guarded, "b", true);
+    expect(guarded, "c a d", true);
+    expect(guarded, "b d", false);
+    conformance_test::one_tree(guarded, "a d d e");
+  }
   // A name is no number and no capitalised word, whatever its length; one
   // that only begins as either is a name.
   const Entry unboundedName{"unboundedname:"};
@@ -345,14 +400,15 @@ int main() {
     CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
           r.diagnostics[0].kind == cursiv::DiagnosticKind::Inserted);
   }
-  // Thirty tokens missing deep in a production of three hundred symbols are
-  // one run of insertions, cheaper than two apart in the other branch.
+  // Thirty tokens missing deep in a production of nine hundred symbols are
+  // one run of insertions, cheaper than three apart in the other branch,
+  // though more than five hundred tokens still complete the text.
   {
     const Entry longRun{"longrun:"};
     std::string text;
     for (int i = 0; i < 270; ++i) text += "x ";
     text += ";";
-    for (int i = 0; i < 40; ++i) text += " n";
+    for (int i = 0; i < 600; ++i) text += " n";
     const std::string source = longRun.source(text);
     const auto r = conformance_test::parser().parse(source);
     CHECK(r.accepted && r.value != nullptr && r.diagnostics.size() == 1 &&
@@ -418,6 +474,9 @@ int main() {
   won(literalConditionRank, "if;", "if", "");
   won(literalConditionRank, "if ;", "", "if");
   won(literalConditionRank, "x;", "", "x");
+  const Entry endRank{"endrank:"};
+  won(endRank, "if", "if", "");
+  won(endRank, "iff", "", "iff");
 
   const Entry mixedRank{"mixedrank:"};
   pick(mixedRank, "if(", "if", "");

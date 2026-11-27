@@ -28,13 +28,18 @@ namespace {
 // A parse gets this long before the test calls it a hang.
 constexpr unsigned kWatchSeconds = 10;
 
-// Written before the parse: the handler may only call `write`.
+// The alarm spans both parser calls and their comparison.
 char gHang[512];
 std::size_t gHangLen = 0;
+enum Phase { Reading, FullElection, Comparing };
+volatile std::sig_atomic_t gPhase = Reading;
 
 // Without alarms, as on Windows, the test's timeout is what stops a hang.
 #ifdef SIGALRM
 extern "C" void rgram_hang(int) {
+  constexpr std::string_view phases[] = {"default parser: ", "full election: ", "comparison: "};
+  const auto phase = phases[gPhase];
+  (void)!::write(2, phase.data(), phase.size());
   (void)!::write(2, gHang, gHangLen);
   ::_exit(3);
 }
@@ -94,6 +99,30 @@ bool same_parse(const ParseResult& a, const ParseResult& b) {
 
 int rgram_lane(unsigned seed, const Parser& parser, const AstReflection& reflection,
                unsigned documents, const Parser* election) {
+  unsigned bad = 0, inLanguage = 0, trees = 0;
+  // The oracle's own contract: inside a region, a blank before the end is no end.
+  RgramGrammar end;
+  end.rules.push_back({.kind = RgramKind::skip,
+                       .children = {{.children = {{.kind = RgramKind::tok, .tok = 'a'},
+                                                  {.kind = RgramKind::cond}}}}});
+  for (const std::string gap : {"", " ", "\n"})
+    if (RgramCfg(end).read({"a" + gap, {'a'}, {"", gap}}, false).accepted != gap.empty()) {
+      std::printf("rgram oracle: tight(a + eof) on \"a%s\" answers wrongly\n", shown(gap).c_str());
+      ++bad;
+    }
+  RgramExpr conditions;
+  conditions.children = {{.kind = RgramKind::tok, .tok = 'a'},
+                         {.kind = RgramKind::cond, .cond = RgramCond::notNone},
+                         {.kind = RgramKind::cond, .tok = 'b', .cond = RgramCond::andTok}};
+  RgramGrammar boundary;
+  boundary.rules.push_back({.children = {{.kind = RgramKind::skip, .children = {conditions}},
+                                        {.kind = RgramKind::tok, .tok = 'b'}}});
+  const RgramCfg outside(boundary);
+  for (const std::string gap : {"", " ", "\n"})
+    if (outside.read({"a" + gap + "b", {'a', 'b'}, {"", gap, ""}}, false).accepted == gap.empty()) {
+      std::printf("rgram oracle: tight(a + !gap::none + &b) + b on \"a%sb\" answers wrongly\n", shown(gap).c_str());
+      ++bad;
+    }
   const RgramGrammar g = RgramGrammar::draw(seed);
   const RgramCfg cfg(g);
   const std::vector<RgramDocument> docs =
@@ -101,7 +130,6 @@ int rgram_lane(unsigned seed, const Parser& parser, const AstReflection& reflect
 #ifdef SIGALRM
   std::signal(SIGALRM, rgram_hang);
 #endif
-  unsigned bad = 0, inLanguage = 0, trees = 0;
   for (std::size_t i = 0; i < docs.size(); ++i) {
     const RgramDocument& d = docs[i];
     const RgramVerdict o = cfg.read(d, g.features.ast);
@@ -112,12 +140,18 @@ int rgram_lane(unsigned seed, const Parser& parser, const AstReflection& reflect
         "rgram %u: document %zu did not finish in %u s: \"%s\"\n", seed, i,
         kWatchSeconds, shown(d.text).c_str());
     gHangLen = len < 0 ? 0 : std::min<std::size_t>(len, sizeof gHang - 1);
+    gPhase = Reading;
     watch(kWatchSeconds);
     const ParseResult r = parser.parse(d.text);
-    if (election && !same_parse(r, election->parse(d.text))) {
-      ++bad;
-      std::printf("rgram %u: document %zu \"%s\": prediction and full election disagree\n",
-                  seed, i, shown(d.text).c_str());
+    if (election) {
+      gPhase = FullElection;
+      const ParseResult full = election->parse(d.text);
+      gPhase = Comparing;
+      if (!same_parse(r, full)) {
+        ++bad;
+        std::printf("rgram %u: document %zu \"%s\": prediction and full election disagree\n",
+                    seed, i, shown(d.text).c_str());
+      }
     }
     watch(0);
     const bool clean = r.accepted && r.diagnostics.empty();

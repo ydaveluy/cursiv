@@ -74,7 +74,7 @@ struct GrammarActions {
   // `payload` is the element that spelled the text: a directive spread
   // over a choice reaches one member through several rules, and the
   // conversion is the rule's, not the directive's.
-  virtual Write writeText(ElementId, ElementId payload, AstNode& owner,
+  virtual Write writeText(ElementId, ElementId payload, WalkTree&, AstNode& owner,
                           std::string_view text) const = 0;
 
   // What a leaf denotes: its own converter applied, or the raw text; nothing

@@ -29,7 +29,7 @@ keyword, use `option(flag<&Decl::isStatic>(kw<"static">))`.
 | `a character class matches no character` | Give the class at least one character. |
 | `a trivia rule is not a terminal` | Use terminals for whitespace and comments. |
 | `which its trivia scope passes` | The rule asks for a token it skips. Remove that call or change its trivia scope. |
-| `is read both inside a trivia scope and outside it` | Make the alternatives agree on which trivia to keep or skip before their shared token. |
+| `could follow either setting` | Make the alternatives agree on which trivia to keep or skip before their shared token. |
 | `is a second indent or dedent terminal` | Declare each indentation terminal only once. |
 | `with its tag is not set on every path` | Set the `mark<>` on every path that reaches the `same<>` of its tag. |
 | `an indentation bracket is not one token` | Name each opening or closing bracket by its token, using a choice for several spellings. |

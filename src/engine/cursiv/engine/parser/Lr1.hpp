@@ -50,7 +50,8 @@ struct LrAutomaton {
 };
 
 // The left-corner component of each nonterminal, past any given leading conditions.
-std::vector<std::uint32_t> left_components(const Cfg& cfg, std::span<const std::uint32_t> prefix = {});
+std::vector<std::uint32_t> left_components(const Cfg& cfg, std::span<const std::uint32_t> prefix = {},
+                                           const std::vector<bool>& nullable = {});
 
 // Where a production's first token may come after symbols that may read
 // nothing, and its caller reads otherwise, each of them is told apart as it

@@ -565,8 +565,9 @@ constexpr auto operator&(E) {
   return And<std::remove_cvref_t<E>>{};
 }
 
-// The end of a line, which consumes its terminator: `\r\n` before `\r`.
-using Eol = decltype(Lit<"\n">{} | Lit<"\r\n">{} | Lit<"\r">{});
+// CRLF is one line ending, including inside a sequence of line endings.
+using Eol = decltype(Lit<"\n">{} | Lit<"\r\n">{} |
+                     Lit<"\r", false, Not<Lit<"\n">>>{});
 
 // `lit<S>` has no guard; `lit<S, G>` carries the one it was given. A terminal
 // named there stands for the body the current grammar spells: a class, a word

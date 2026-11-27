@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <functional>
 #include <iterator>
 #include <map>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
@@ -138,7 +140,7 @@ class Emitter {
     const auto ns = names.ns;
     std::set<std::uint32_t> marks;
     for (const auto& opening : _cfg.openings)
-      for (const auto& [mark, depth] : opening) marks.insert(mark);
+      for (const auto& slot : opening) marks.insert(slot.mark);
     for (const auto mark : marks) {
       std::set<std::uint32_t> states;
       for (const auto& site : _p.gotos[mark]) states.insert(site.target);
@@ -263,6 +265,8 @@ class Emitter {
     line("  static constexpr bool splits = ", _arms.empty() ? "false" : "true", ";");
     line("  static constexpr ::std::uint16_t dedent = ", _cfg.dedent, ";");
     line("  static constexpr bool indents = ", _cfg.indent != 0 || _cfg.dedent != 0 ? "true" : "false", ";");
+    line("  static constexpr bool mutedLines = ",
+         _cfg.newline && !_cfg.opens.empty() ? "true" : "false", ";");
     line("  static constexpr bool linesIn = ", _cfg.newlineIn.empty() ? "false" : "true", ";");
     line("  static constexpr bool hides = ", _hides ? "true" : "false", ";");
     line("  static constexpr bool matching = ", _p.matcher.entries.empty() ? "false" : "true", ";");
@@ -561,8 +565,10 @@ class Emitter {
     field("kernels", _p.kernels);
     field("cornerAt", _p.cornerAt);
     field("corners", _p.corners);
+    field("yields", _p.yields);
     field("mayCloseOf", _p.mayCloseOf);
     field("wordBytes", _p.wordBytes);
+    if (!_p.lineLeads.empty()) field("lineLeads", _p.lineLeads);
     field("terminalRank", _p.terminalRank);
     field("terminalEntry", _p.terminalElement);
     {
@@ -728,6 +734,7 @@ class Emitter {
     line("  t.terminalTrivia = kTerminalTrivia;");
     if (_cfg.indent != 0) line("  t.indentTerminal = ", _cfg.indent, ";");
     if (_cfg.dedent != 0) line("  t.dedentTerminal = ", _cfg.dedent, ";");
+    if (_cfg.newline != 0) line("  t.lines = ", _p.lines, ";");
     if (!_cfg.newlineIn.empty()) line("  t.newlineIn = ", _p.newlineIn, ";");
     line("  t.terminalCount = ", _p.terminalElement.size(), ";");
     line("  t.hides = ", _hides ? "true" : "false", ";");
@@ -943,6 +950,24 @@ class Emitter {
     line("        if (", all_of(tests), ") return Token{p, kLexWalk};");
   }
 
+  // A lone exception can use the literal's comparison if every spelling it
+  // admits after the first byte reaches that one exceptional state.
+  const Terminal* lone_literal(const WordPath& path) const {
+    if (path.spelled.size() != 1) return nullptr;
+    const auto [length, end, id] = path.spelled.front();
+    if (id == kNoToken) return nullptr;
+    const auto& term = _cfg.terminals[id];
+    if (term.text.size() != length) return nullptr;
+    auto state = path.first;
+    for (const unsigned char c : term.text.substr(1)) {
+      const auto to = _p.transition(state, c);
+      if (term.folded && (c >= 0x80 || ((c | 0x20u) - 'a' < 26u && _p.transition(state, c ^ 0x20) != to)))
+        return nullptr;
+      state = to;
+    }
+    return state == end ? &term : nullptr;
+  }
+
   // A first byte then a run: what a text of `spelled` reads where the run
   // spells it, the pattern otherwise.
   void word(const WordPath& path) {
@@ -955,19 +980,41 @@ class Emitter {
          std::size_t{path.run} * 256, ", p + 1, stop);");
     line("        if (e == nullptr) return Token{p, kLexWalk};");
     if (path.wide) line("        if (e != end && byte_at(e) >= 0x80) return Token{p, kLexWalk};");
-    for (const Spelling& spelling : path.spelled) {
-      std::vector<std::string> tests{"e - p == " + std::to_string(spelling.text.size())};
-      spells(spelling.text, spelling.folded, tests);
-      if (spelling.terminal == kNoToken) {
-        line("        if (", all_of(tests), ") return Token{p, kLexWalk};");
-        continue;
-      }
+    if (const auto* term = lone_literal(path)) {
+      std::vector<std::string> tests{"e - p == " + std::to_string(term->text.size())};
+      spells(term->text, term->folded, tests);
       if (guarded) {
         walk_before_wide(tests, "e");
         tests.push_back(no_word_at("e"));
       }
       line("        if (", all_of(tests), ") {");
-      give(spelling.terminal, "e", "          ");
+      give(path.spelled.front().terminal, "e", "          ");
+      line("        }");
+    } else if (!path.spelled.empty()) {
+      std::map<std::uint16_t, std::vector<std::uint16_t>> ends;
+      std::set<std::uint16_t> lengths;
+      for (const auto& s : path.spelled) {
+        lengths.insert(s.length);
+        ends[s.terminal].push_back(s.state);
+      }
+      line("        switch (e - p) {");
+      line(cases(lengths, "          "), " {");
+      line("          ::std::uint16_t state = ", path.first, ";");
+      line("          for (const char* at = p + 1; at != e; ++at) state = t.transition(state, t.byteClass[byte_at(at)]);");
+      line("          switch (state) {");
+      for (const auto& [terminal, states] : ends) {
+        line(cases(states, "            "));
+        if (terminal == kNoToken) line("              return Token{p, kLexWalk};");
+        else {
+          if (guarded) {
+            walk_before_wide({}, "e");
+            line("              if (!", no_word_at("e"), ") break;");
+          }
+          give(terminal, "e", "              ");
+        }
+      }
+      line("          }");
+      line("          break;\n        }");
       line("        }");
     }
     give(path.terminal, "e", "        ");
@@ -1302,6 +1349,10 @@ class Emitter {
       if (held && _p.states[gotos.front().target].reduce != kNone) form |= kThenReduces;
     }
     if (held && names(prod)) form |= kGivesBack;
+    if (held && _cfg.regions.size() > 1 && !prod.tests.empty() &&
+        std::ranges::all_of(prod.tests, [](const Test& t) {
+          return !t.unless && t.ahead.size() == 1 && t.ahead.front() == kEndOfInput;
+        })) form |= kSettlesEnd;
     if (!prod.takes.empty()) form |= kTakes;
     const auto step = [&](unsigned as) {
       return "&Drive<L>::template reduce<M, " + std::string(held ? "true, " : "false, ") +
@@ -1318,8 +1369,13 @@ class Emitter {
     unsigned machine = form;
     if (_ends[prod.lhs].all.list != kNone) machine = (form & ~unsigned{kThenReduces}) | kStays;
     else if ((form & kOneSite) == 0 && _ends[prod.lhs].some) machine |= kMayStay;
-    return {step(machine) + tests + (holds ? ", &kR@>" : ", nullptr, &kR@>"),
-            step(form) + tests + ">"};
+    std::string prefix;
+    if (prod.capture) prefix = ", -1";
+    if (prod.opening)
+      for (const auto& slot : std::views::reverse(_cfg.openings[prod.opening - 1]))
+        if (slot.writes) prefix += ", " + std::to_string(slot.depth);
+    return {step(machine) + tests + (holds ? ", &kR@" : ", nullptr, &kR@") + prefix + ">",
+            step(form) + tests + (prefix.empty() ? "" : (holds ? ", nullptr" : ", nullptr, nullptr") + prefix) + ">"};
   }
   // The turn of a list that a transition from `from` to `tail` ends: the
   // list's state and the `drops` frames over it, where that state is one.
@@ -1665,7 +1721,8 @@ class Emitter {
       if (const std::uint32_t lone = _p.states[state].reduce; lone != kNone) reached(lone, held);
     };
     enter(0, false);
-    for (const std::uint32_t reads : _p.conditions) enter(reads, false);
+    // A condition starts with the caller's lookahead already in hand.
+    for (const std::uint32_t reads : _p.conditions) enter(reads, true);
     for (const PackedState& state : _p.states)
       for (const PackedAction& action : state.actions)
         if (action.kind == PackedAction::Kind::shift) enter(action.value, false);
@@ -1730,22 +1787,23 @@ class Emitter {
     // are only ever taken.
     std::map<std::vector<std::uint32_t>, std::size_t> next;
     std::vector<std::uint32_t> base(rows.size(), 0);
-    std::vector<std::uint64_t> mask;
     std::size_t lowest = 0;
     width = 0;
     for (const std::uint32_t r : order) {
       const std::vector<std::uint32_t>& columns = rows[r];
       const std::uint32_t first = columns.front();
-      mask.assign((columns.back() - first) / 64 + 1, 0);
-      for (const std::uint32_t c : columns) mask[(c - first) / 64] |= std::uint64_t{1} << ((c - first) % 64);
       std::size_t& from = next[columns];
       std::size_t at = std::max(from, lowest > first ? lowest - first : 0);
-      const auto fits = [&] {
-        for (std::size_t w = 0; w < mask.size(); ++w)
-          if ((window(at + first + 64 * w) & mask[w]) != 0) return false;
-        return true;
-      };
-      while (!fits()) ++at;
+      // The places from `at` on, 64 at a time: one stays open while the slot
+      // of each column there is free.
+      for (;; at += 64) {
+        std::uint64_t open = ~std::uint64_t{0};
+        for (auto c = columns.begin(); open != 0 && c != columns.end(); ++c) open &= ~window(at + *c);
+        if (open != 0) {
+          at += static_cast<std::size_t>(std::countr_zero(open));
+          break;
+        }
+      }
       for (const std::uint32_t c : columns) set(used, at + c);
       from = at + 1;
       base[r] = static_cast<std::uint32_t>(at);
@@ -2005,6 +2063,7 @@ class Emitter {
       return t.condition != 0 || !t.shadows.empty();
     });
     const std::string m = ahead ? "m" : "m.lexing()";
+    const char* gapFrom = _cfg.newline && !_cfg.opens.empty() ? "m.at" : "p";
     for (const Test& test : prod.tests) {
       std::vector<std::string> parts;
       const std::string from = m + ".src + tok.begin(m.lexing())";
@@ -2013,16 +2072,22 @@ class Emitter {
         // text: where a token that may comes, the text is read again with
         // the test's alphabet, which skips the test's trivia.
         std::string in, shadow, read;
-        for (const std::uint16_t t : test.ahead)
-          in += (in.empty() ? "tok.terminal() == " : " || tok.terminal() == ") + std::to_string(t);
-        if (!test.shadows.empty()) {
-          for (const std::uint16_t t : test.shadows)
-            shadow += (shadow.empty() ? "tok.terminal() == " : " || tok.terminal() == ") +
-                      std::to_string(t);
+        for (const std::uint16_t t : test.ahead) {
+          const bool localEnd = t == kEndOfInput && !test.shadows.empty() && test.shadows.front() == t;
+          if (!in.empty()) in += " || ";
+          const auto matches = "tok.terminal() == " + std::to_string(t);
+          in += localEnd ? "(" + matches + " && ((tok.head & kTold) || p == " + from + "))" : matches;
+        }
+        for (const std::uint16_t t : test.shadows) {
+          const Region& scope = _cfg.regions[prod.region];
+          if (t == kEndOfInput && scope.ignored.empty() && scope.hidden.empty()) continue;
+          shadow += (shadow.empty() ? "tok.terminal() == " : " || tok.terminal() == ") + std::to_string(t);
+        }
+        if (!shadow.empty()) {
           for (const std::uint16_t t : test.ahead)
             read += (read.empty() ? "a.terminal() == " : " || a.terminal() == ") + std::to_string(t);
           const std::string alphabet = std::to_string(test.alphabet);
-        in += " || ((" + shadow + ") && [&] { const Token a = m.observed(" + m + ".t.modes[" +
+          in += " || ((" + shadow + ") && [&] { const Token a = m.observed(" + m + ".t.modes[" +
                 alphabet + "].read(" + m + ", p, " + alphabet + ")); return (" + read +
                 ") && (a.begin(m.lexing()) != tok.begin(m.lexing()) || a.end == tok.end); }())";
         }
@@ -2032,14 +2097,16 @@ class Emitter {
         parts.push_back(std::string(test.unless ? "!" : "") + m + ".reads(" +
                         std::to_string(_p.conditions[test.condition - 1]) + ", p, tok, indent)");
       if (test.gap != Test::Gap::any) {
+        // The gap begins past the reading's last token: a predicate is handed it.
+        const std::string origin = ahead ? "gap" : gapFrom;
         const std::string gap =
-            test.gap == Test::Gap::empty  ? "p == " + from
+            test.gap == Test::Gap::empty  ? origin + " == " + from
             : test.gap == Test::Gap::line ? m + ".line_between(p, " + from + ", " +
                                                 (ahead ? "indent" : "m.indented") + ")"
                                           : m + ".gap_reads(" +
-                                                std::to_string(test.gapMonitor) + ", p, " + from +
-                                                ", " + (test.gap == Test::Gap::is ? "true" : "false") +
-                                                ")";
+                                                std::to_string(test.gapMonitor) + ", " + origin +
+                                                ", " + from + ", " +
+                                                (test.gap == Test::Gap::is ? "true" : "false") + ")";
         parts.push_back(std::string(test.gapUnless ? "!(" : "(") + gap + ")");
       }
       if (parts.empty()) {
@@ -2049,12 +2116,16 @@ class Emitter {
       }
       holds += (holds.empty() ? "(" : " || (") + all_of(parts) + ")";
     }
+    // The gap's beginning is looked up only for a production that tests it.
+    const bool gaps = std::ranges::any_of(prod.tests, [](const Test& t) {
+      return t.gap != Test::Gap::any && t.gap != Test::Gap::line;
+    });
     if (ahead && !holds.empty())
-      holds = "m.lexing().check([](Machine& m, const char* p, Token tok, "
-             "[[maybe_unused]] Indented indent) { return " +
-             holds + "; }, p, tok, m.indented)";
+      holds = "m.lexing().check([](Machine& m, const char* p, [[maybe_unused]] const char* gap, "
+              "Token tok, [[maybe_unused]] Indented indent) { return " +
+              holds + "; }, p, " + (gaps ? gapFrom : "p") + ", tok, m.indented)";
     if (!prod.opening) return holds;
-    for (const auto& [mark, depth] : _cfg.openings[prod.opening - 1]) {
+    for (const auto& [mark, depth, writes] : _cfg.openings[prod.opening - 1]) {
       const auto test = "guard" + std::to_string(mark) + "(m.under(" +
                         std::to_string(depth + prod.rhs.size()) + "))";
       holds = holds.empty() ? test : "(" + holds + ") && " + test;

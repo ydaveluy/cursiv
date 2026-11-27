@@ -61,21 +61,13 @@ struct GrammarGenerator {
     // the region, take the caller's. `kNoElement` is the grammar's own.
     ElementId region = kNoElement;
     ElementId gap = kNoElement;
-    // The last token written, which may read the trivia after it.
-    ElementId last = kNoElement;
     // The end of input was asserted: no token may follow.
     bool ended = false;
+    bool adjacent = false;
     // The value rule the assignment being walked descended into: its converter
     // is the payload's, and a token of its own names another element.
     ElementId valueRule = kNoElement;
-  };
-
-  // What one rule's body collected: the node it built, and the node a bare
-  // call handed it to pass up.
-  struct Frame {
-    ElementId rule = kNoElement;
-    AstNode* node = nullptr;
-    AstNode* adopted = nullptr;
+    std::vector<LineRole> brackets{};
   };
 
   [[nodiscard]] bool cheap(const Walk& w) const {
@@ -100,26 +92,27 @@ struct GrammarGenerator {
     // A rule that carries its own creation makes its node here: the model
     // fuses a rule's label and its `create` into one element when no
     // alternative builds a head of its own.
-    Frame f{rule, act.make(rule, *w.ar), nullptr};
-    for (const ElementId c : g.childrenOf(rule)) walk(c, kNoElement, f, w);
+    AstNode* current = act.make(rule, *w.ar);
+    for (const ElementId c : g.childrenOf(rule)) walk(c, kNoElement, current, w);
     --w.depth;
-    AstNode* const out = f.node != nullptr ? f.node : f.adopted;
-    built = out != nullptr;
-    return out;
+    built = current != nullptr;
+    return current;
   }
 
-  void walk(ElementId e, ElementId assign, Frame& f, Walk& w) const {
+  void walk(ElementId e, ElementId assign, AstNode*& current, Walk& w) const {
     if (!w.ok) return;
     const std::span<const ElementId> children = g.childrenOf(e);
     switch (g.kindOf(e)) {
       case ElementKind::literal:
+      case ElementKind::character_range:
+      case ElementKind::any_character:
       case ElementKind::terminal_rule:
       case ElementKind::through: {
         Veto after;
         std::string text =
-            g.kindOf(e) == ElementKind::terminal_rule
-                ? terminal_value(e, after, w)
-                : lex.spell(e, SpellStyle::shortest, *w.src, after);
+            g.kindOf(e) == ElementKind::literal || g.kindOf(e) == ElementKind::through
+                ? lex.spell(e, SpellStyle::shortest, *w.src, after)
+                : terminal_value(e, after, w);
         emit(e, std::move(text), after, w);
         return;
       }
@@ -138,36 +131,42 @@ struct GrammarGenerator {
             w.valueRule = e;
           return;
         }
-        if (f.adopted == nullptr) f.adopted = sub;
+        current = sub;
         return;
       }
       case ElementKind::assignment:
-        assign_member(e, f, w);
+        assign_member(e, current, w);
+        return;
+      case ElementKind::flag:
+        for (const ElementId c : children) walk(c, assign, current, w);
+        if (w.ok && (current == nullptr ||
+                     act.writeText(e, kNoElement, *w.ar, *current, {}) == Write::NotModelled))
+          refuse(e, current, w);
         return;
       case ElementKind::create:
-        f.node = act.make(e, *w.ar);
-        for (const ElementId c : children) walk(c, assign, f, w);
+        current = act.make(e, *w.ar);
+        for (const ElementId c : children) walk(c, assign, current, w);
         return;
       case ElementKind::nest: {
-        // The node built so far is the one this wraps; a bare call left it in
-        // `adopted`.
-        AstNode* const inner = f.node != nullptr ? f.node : f.adopted;
-        f.adopted = nullptr;
-        f.node = act.make(e, *w.ar);
-        if (f.node == nullptr || inner == nullptr ||
-            act.writeNode(e, *f.node, inner) == Write::NotModelled)
-          refuse(e, f.node, w);
-        for (const ElementId c : children) walk(c, assign, f, w);
+        AstNode* const inner = current;
+        current = act.make(e, *w.ar);
+        if (current == nullptr || inner == nullptr ||
+            act.writeNode(e, *current, inner) == Write::NotModelled)
+          refuse(e, current, w);
+        for (const ElementId c : children) walk(c, assign, current, w);
         return;
       }
       case ElementKind::ordered_choice:
       case ElementKind::unordered_choice: {
         if (children.empty()) return;
-        walk(children[pick(children, w)], assign, f, w);
+        walk(children[pick(children, w)], assign, current, w);
         return;
       }
       case ElementKind::repetition:
-        repeat(e, assign, f, w);
+        repeat(e, assign, current, w);
+        return;
+      case ElementKind::empty_gap:
+        w.adjacent = true;
         return;
       case ElementKind::and_predicate:
       case ElementKind::not_predicate:
@@ -182,20 +181,19 @@ struct GrammarGenerator {
         const ElementId caller = w.region;
         const std::size_t first = w.d.tokens.size();
         w.region = e;
-        for (const ElementId c : children) walk(c, assign, f, w);
+        for (const ElementId c : children) walk(c, assign, current, w);
         w.region = caller;
         if (w.d.tokens.size() != first) w.gap = caller;
         return;
       }
       case ElementKind::group:
       case ElementKind::unordered_group:
-        for (const ElementId c : children) walk(c, assign, f, w);
+        for (const ElementId c : children) walk(c, assign, current, w);
         return;
       default:
         break;
     }
-    // What the walk cannot write: a character range in the syntax, whose
-    // separators it cannot place, and an assertion it cannot impose.
+    // A layout token or an unenforced assertion leaves the derivation incomplete.
     ++w.d.unrendered;
     w.ok = false;
   }
@@ -230,7 +228,7 @@ struct GrammarGenerator {
       const InfixOp& o = *next[w.src->choose(
           DecisionKind::entry, static_cast<unsigned>(next.size()))];
       const std::size_t before = w.d.tokens.size();
-      Frame none;
+      AstNode* none = nullptr;
       walk(o.element, kNoElement, none, w);
       if (!w.ok) break;
       if (w.d.tokens.size() == before) {
@@ -313,19 +311,17 @@ struct GrammarGenerator {
   // A member is written from one node or one token. A value of several tokens,
   // which a data rule joins, is only named. The operand builds in a frame of
   // its own: the node it ends with, created, called or nested, is the value.
-  void assign_member(ElementId e, Frame& f, Walk& w) const {
-    AstNode* const to = f.node;
+  void assign_member(ElementId e, AstNode* to, Walk& w) const {
     const std::size_t first = w.d.tokens.size();
     const ElementId outerRule = w.valueRule;
     w.valueRule = kNoElement;
-    Frame operand{f.rule, nullptr, nullptr};
-    for (const ElementId c : g.childrenOf(e)) walk(c, e, operand, w);
+    AstNode* child = nullptr;
+    for (const ElementId c : g.childrenOf(e)) walk(c, e, child, w);
     const ElementId rule = w.valueRule;
     w.valueRule = outerRule;
     if (!w.ok) return;
-    if (AstNode* const value =
-            operand.node != nullptr ? operand.node : operand.adopted) {
-      if (to == nullptr || act.writeNode(e, *to, value) == Write::NotModelled)
+    if (child != nullptr) {
+      if (to == nullptr || act.writeNode(e, *to, child) == Write::NotModelled)
         refuse(e, to, w);
       return;
     }
@@ -349,12 +345,12 @@ struct GrammarGenerator {
       }
     }
     const ElementId from = rule != kNoElement ? rule : w.d.tokens[first].elem;
-    if (act.writeText(e, from, *to, w.ar->stash(value)) == Write::NotModelled)
+    if (act.writeText(e, from, *w.ar, *to, value) == Write::NotModelled)
       refuse(e, to, w);
   }
 
-  // The alternative: the cheapest once the budget is spent, so recursion
-  // closes. One that spells nothing comes last: its assertion is unchecked.
+  // Prefer alternatives that spell tokens while exploring. At the budget,
+  // a nullable alternative can terminate a recursive rule.
   [[nodiscard]] unsigned pick(std::span<const ElementId> children,
                               Walk& w) const {
     if (guide != nullptr) {
@@ -362,27 +358,34 @@ struct GrammarGenerator {
       if (k >= 0) return static_cast<unsigned>(k);
     }
     unsigned spelling = 0;
-    for (const ElementId c : children) spelling += cost[c] != 0 ? 1u : 0u;
+    const bool closing = cheap(w);
+    const auto eligible = [&](ElementId c) {
+      const auto min = cost[c];
+      return (min.tokens != 0 || (closing && !min.conditional)) &&
+             (w.brackets.empty() || w.brackets.back() != LineRole::open ||
+              lex.lineRole(c) != LineRole::newline);
+    };
+    for (const ElementId c : children) spelling += eligible(c) ? 1u : 0u;
     if (spelling == 0) spelling = static_cast<unsigned>(children.size());
     const bool all = spelling == children.size();
-    if (!cheap(w)) {
+    if (!closing) {
       unsigned k = w.src->choose(DecisionKind::entry, spelling);
       for (unsigned i = 0; i < children.size(); ++i)
-        if (all || cost[children[i]] != 0) {
+        if (all || eligible(children[i])) {
           if (k-- == 0) return i;
         }
       return 0;
     }
     unsigned best = static_cast<unsigned>(children.size());
     for (unsigned i = 0; i < children.size(); ++i) {
-      if (!all && cost[children[i]] == 0) continue;
+      if (!all && !eligible(children[i])) continue;
       if (best == children.size() || cost[children[i]] < cost[children[best]])
         best = i;
     }
     return best == children.size() ? 0u : best;
   }
 
-  void repeat(ElementId e, ElementId assign, Frame& f, Walk& w) const {
+  void repeat(ElementId e, ElementId assign, AstNode*& current, Walk& w) const {
     const std::span<const ElementId> children = g.childrenOf(e);
     if (children.empty()) return;
     const unsigned lo = g.minOf(e);
@@ -395,30 +398,39 @@ struct GrammarGenerator {
     unsigned n = lo;
     if (!steered && !cheap(w) && extra != 0)
       n = lo + w.src->choose(DecisionKind::byte, extra + 1);
-    for (unsigned i = 0; i < n && w.ok; ++i) round(children, i, assign, f, w);
+    for (unsigned i = 0; i < n && w.ok; ++i) round(children, i, assign, current, w);
     while (steered && w.ok && n < lo + extra &&
            guide->another(head, w.d.tokens.size()) > 0)
-      round(children, n++, assign, f, w);
+      round(children, n++, assign, current, w);
   }
 
   void round(std::span<const ElementId> children, unsigned i, ElementId assign,
-             Frame& f, Walk& w) const {
-    if (i != 0 && children.size() > 1) walk(children[1], assign, f, w);
-    walk(children[0], assign, f, w);
+             AstNode*& current, Walk& w) const {
+    if (i != 0 && children.size() > 1) walk(children[1], assign, current, w);
+    walk(children[0], assign, current, w);
   }
 
   void emit(ElementId e, std::string text, const Veto& after, Walk& w) const {
-    if (text.empty() || w.ended) {
+    const LineRole role = lex.lineRole(e);
+    if (text.empty() || w.ended || (role == LineRole::newline &&
+        !w.brackets.empty() && w.brackets.back() == LineRole::open)) {
       ++w.d.unrendered;
       w.ok = false;
       return;
     }
-    // No trivia in front of the first token.
-    const std::string_view sep =
-        w.d.tokens.empty() ? std::string_view{}
-                           : lex.separator(w.gap, w.last, e);
+    std::string_view sep;
+    if (!std::exchange(w.adjacent, false) && !w.d.tokens.empty()) {
+      const auto& last = w.d.tokens.back();
+      const auto separator = [&](ElementId scope) {
+        return lex.separator(scope, last.elem, e, last.text, text.front());
+      };
+      sep = separator(w.gap);
+      // A separator before the region may also be its first visible token.
+      if (w.gap != w.region && !sep.empty() && separator(w.region) != sep) sep = {};
+    }
+    if (role == LineRole::open || role == LineRole::block) w.brackets.push_back(role);
+    else if (role == LineRole::close && !w.brackets.empty()) w.brackets.pop_back();
     w.gap = w.region;
-    w.last = e;
     w.d.tokens.push_back(
         GrammarToken{e, std::move(text), std::string(sep), 0, 0, after});
   }
@@ -433,7 +445,7 @@ struct GrammarGenerator {
                              : static_cast<SpellStyle>(w.src->choose(
                                    DecisionKind::style, kSpellStyles));
       std::string s = lex.spell(e, style, *w.src, after);
-      if (s.empty() || lex.reserved(s)) continue;
+      if (s.empty()) continue;
       w.d.styles |= 1u << static_cast<unsigned>(style);
       return s;
     }

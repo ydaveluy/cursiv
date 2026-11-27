@@ -801,6 +801,7 @@ void a_prefix_binds_what_is_tighter(const cursiv::Parser& p) {
   check(p, "unary:", "a - -b", "(a - (-b))");
   check(p, "unary:", "NOT a < b AND c", "((NOT (a < b)) AND c)");
   check(p, "unary:", "NOT NOT a", "(NOT (NOT a))");
+  check(p, "unary:", "~NOT a", "(~NOT a)");
   check(p, "unary:", "NOT a OR b", "((NOT a) OR b)");
 }
 
@@ -838,6 +839,9 @@ void a_prefix_table_leaves_its_left_operand(const cursiv::Parser& p) {
   const auto parsed = p.parse("adopted:-x<y");
   const auto* const v = cursiv::ast_cast<ast::Binary>(value(parsed));
   CHECK(v != nullptr && v->op == "-" && v->right != nullptr && v->left != nullptr);
+  const auto same = p.parse("adopted:!x");
+  const auto* const w = cursiv::ast_cast<ast::Binary>(value(same));
+  CHECK(w != nullptr && w->op == "!" && w->right != nullptr);
 }
 
 // A postfix ends any operand, whatever binds on its right: its own level
@@ -941,6 +945,10 @@ void a_newline_ends_what_reads_it(const cursiv::Parser& p) {
       {"heads:", "h []-\n", 1},
       {"heads:", "h\n[]-\n", 2},
       {"heads:", "h \n[]-\n", 2},
+      // A bracket that opens operators of one level or two mutes line ends.
+      {"indexed:", "x[a]\ny[b!]", 2},
+      {"indexed:", "x[a\n]\ny[b!\n]", 2},
+      {"indexed:", "once x[a\n]", 1},
   };
   for (const auto& sample : cases) {
     // The AST holds views into the text it was read from: keep it alive.
@@ -970,6 +978,9 @@ void levels_that_open_a_line_group(const cursiv::Parser& p) {
       {"a\n\n|| b\n\n&& d", "(a || (b && d))"},
       {"a && b\nd || e", "(a && b) ; (d || e)"},
       {"a\nb", "a ; b"},
+      // A comment's line end is a line end: to the operators too.
+      {"a /* c\n */ && b", "(a && b)"},
+      {"a /* c\n */ b", "a ; b"},
   };
   for (const auto& sample : cases) {
     const std::string source = "logic:" + std::string(sample.text);
@@ -1000,8 +1011,9 @@ void a_line_ends_what_its_operators_leave(const cursiv::Parser& p) {
       {"a < b -\nc", "(a < (b - c))"},
       {"a < b\n* c", "<refused>"},
   };
-  // The guard written in the operator's rule, or in a rule that one calls.
-  for (const char* const section : {"gapped:", "factored:"})
+  // The guard written in the operator's rule, or in a rule that one calls,
+  // alone or as one of two alternatives.
+  for (const char* const section : {"gapped:", "factored:", "either:", "eitherrule:"})
     for (const auto& sample : cases) {
       const std::string source = std::string(section) + std::string(sample.text);
       const cursiv::ParseResult r = p.parse(source);
@@ -1016,6 +1028,16 @@ void a_line_ends_what_its_operators_leave(const cursiv::Parser& p) {
       }
       same_text(section, sample.text, got, sample.expected);
     }
+  // Where the second alternative holds, a blank before the line end, the
+  // operator reads on.
+  for (const char* const section : {"either:", "eitherrule:"}) {
+    const std::string source = std::string(section) + "a < b \n-c";
+    const cursiv::ParseResult r = p.parse(source);
+    std::string got;
+    if (const auto* const lines = r.valueAs<ast::Lines>(); lines != nullptr && r.diagnostics.empty())
+      for (const ast::Expr* const item : lines->items) spell(*item, got);
+    same_text(section, "a < b \n-c", got, "(a < (b - c))");
+  }
 }
 
 // An operator two gap tests guard leaves its left operand to the looser
@@ -1065,6 +1087,8 @@ void a_block_brings_line_ends_back(const cursiv::Parser& p) {
       {"lines:", "a /* c\n */ .b", "(a . b)"},
       {"glued:", "a\nbc", "a ; c"},
       {"glued:", "a/*\n*/b", "<refused>"},
+      {"glued:", "a\n.b", "a ; b"},
+      {"glued:", "a /*\n*/ .b", "<refused>"},
       // Where both arms read the text, the first is taken.
       {"told:", "x c", "{} ; x ; c"},
       {"told:", "x\nc", "[] ; x ; c"},

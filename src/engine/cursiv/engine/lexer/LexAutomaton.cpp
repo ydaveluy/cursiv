@@ -49,9 +49,8 @@ bool ascii_letter(unsigned char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
 
-// Whether `id` is one plain pattern: text, with no condition in it, its
-// literals marked by none of the flags but `flags`.
-bool plain_pattern(const GrammarImage& image, ImageId id, std::uint8_t flags) {
+// A gap reads regular text. A literal may test regular text at its end.
+bool gap_pattern(const GrammarImage& image, ImageId id) {
   std::vector<ImageId> open{id};
   while (!open.empty()) {
     const ImageNode n = image.nodes[open.back()];
@@ -61,7 +60,13 @@ bool plain_pattern(const GrammarImage& image, ImageId id, std::uint8_t flags) {
       case ImageKind::byte:
         break;
       case ImageKind::lit:
-        if ((n.flags & ~(flags | kLitKeyword)) != 0) return false;
+        if ((n.flags & ~(kLitFolded | kLitKeyword | kLitGuardExpr)) != 0) return false;
+        if ((n.flags & kLitGuardExpr) != 0) {
+          const auto guard = image.children[n.first];
+          const auto& g = image.nodes[guard];
+          open.push_back(g.kind == ImageKind::notOf || g.kind == ImageKind::andOf
+                             ? image.children[g.first] : guard);
+        }
         break;
       case ImageKind::doc:
         open.push_back(image.children[n.first]);
@@ -192,7 +197,7 @@ std::uint32_t LexAutomatonBuilder::add_monitor(const LexAutomatonBuilder& reads)
       if (a.guard == LexTest::word) throw NotRegular{"a keyword's test inside a condition"};
       if (a.guard == LexTest::waits)
         throw NotRegular{"a condition inside a condition that reads too far"};
-      flags |= a.guard != LexTest::none ? 2 : a.back == 0 ? 3 : 1;
+      flags |= (a.guard == LexTest::none ? 3 : 2) | (a.back == 0 ? 4 : 0);
     }
     made.flags.push_back(flags);
   }
@@ -225,7 +230,7 @@ std::uint32_t LexAutomatonBuilder::fold_guard(ImageId literal) {
 }
 
 std::uint32_t LexAutomatonBuilder::pattern(ImageId body, bool anywhere) {
-  if (!plain_pattern(_image, body, kLitFolded))
+  if (!gap_pattern(_image, body))
     throw Refused("the grammar uses an expression in `gap::has` or `gap::is` that they cannot test: "
                   "they take classes, literals, `any`, sequences, choices and repetitions, never "
                   "a `through` or the end of input");
@@ -442,7 +447,7 @@ std::vector<std::pair<ImageId, bool>> LexAutomatonBuilder::branches(ImageId body
   std::unordered_set<ImageId> begun;
   const auto tests = [&](ImageId id) {
     const ImageKind kind = _image.nodes[_image.bare(id)].kind;
-    return kind == ImageKind::notOf || kind == ImageKind::andOf;
+    return kind == ImageKind::notOf || kind == ImageKind::andOf || kind == ImageKind::eof;
   };
   // The one part of a sequence that reads, none where several do.
   const auto reader = [&](const ImageNode& n) {

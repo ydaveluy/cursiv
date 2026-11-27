@@ -1,6 +1,4 @@
-// The directives of one compiled grammar, applied. It refuses what it does not
-// model: a `Parts` converter, a payload with several sources, a member no
-// `put` expresses.
+// Applies a compiled grammar's directives to the generated tree.
 #pragma once
 
 #include <array>
@@ -168,15 +166,13 @@ struct directive<cursiv::detail::Flag<P, E>> {
 template <class T, auto P, class E>
 struct directive<cursiv::detail::Nest<T, P, E>> {
   static constexpr bool is_one = true;
-  static constexpr bool enable = false;
   static constexpr auto ptr = P;
-  using payload = E;
 };
 
 using DenoteFn = std::optional<std::string> (*)(std::string_view);
 using MakeFn = AstNode* (*)(WalkTree&);
 using NodeFn = Write (*)(AstNode&, AstNode*);
-using TextFn = Write (*)(AstNode&, ElementId, std::string_view);
+using TextFn = Write (*)(WalkTree&, AstNode&, ElementId, std::string_view);
 
 // A converter's answer that may fail: a `ConversionResult`.
 template <class R>
@@ -190,9 +186,8 @@ AstNode* make_node(WalkTree& ar) {
 
 // What a leaf's converter answers, asked as the engine asks: its parts, of
 // which a token has one, then its text, or nothing.
-template <class R>
+template <class Cv>
 auto convert_leaf([[maybe_unused]] std::string_view raw) {
-  using Cv = cursiv::detail::conv_t<R>;
   if constexpr (cursiv::detail::ConvertsParts<Cv>)
     return Cv::convert(Parts{&raw, 1});
   else if constexpr (cursiv::detail::ConvertsText<Cv>)
@@ -203,7 +198,7 @@ auto convert_leaf([[maybe_unused]] std::string_view raw) {
 
 template <class R>
 std::optional<std::string> denote_of(std::string_view raw) {
-  auto result = convert_leaf<R>(raw);
+  auto result = convert_leaf<cursiv::detail::conv_t<R>>(raw);
   if constexpr (fallible<decltype(result)>) {
     if (!result) return std::nullopt;
     return std::string(*result.value);
@@ -220,8 +215,8 @@ consteval DenoteFn denote_entry() {
   if constexpr (requires { typename T::kind; })
     if constexpr (kIsTerminalRule<T> || cursiv::detail::is_data_rule<T>)
       if constexpr (cursiv::detail::HasConverter<cursiv::detail::conv_t<T>>) {
-        using V = cursiv::detail::unwrap_result_t<decltype(convert_leaf<T>(
-            std::string_view{}))>;
+        using V = cursiv::detail::unwrap_result_t<decltype(
+            convert_leaf<cursiv::detail::conv_t<T>>(std::string_view{}))>;
         if constexpr (std::is_same_v<V, std::string_view> ||
                       std::is_same_v<V, std::string>)
           return &denote_of<T>;
@@ -257,10 +252,14 @@ Write write_node_of(AstNode& owner, AstNode* child) {
 // The converter's answer. A failed positioned result is still modelled: the
 // engine leaves the member at its default, as here.
 template <class F, class A, class Res>
-Write accept(typename F::owner& o, Res&& r) {
+Write accept(WalkTree& ar, typename F::owner& o, Res&& r) {
   if constexpr (fallible<Res>) {
     if (!r) return Write::Modelled;
-    return store<F, A>(o, std::move(*r.value));
+    return accept<F, A>(ar, o, std::move(*r.value));
+  } else if constexpr (cursiv::detail::is_ref_content(F::content)) {
+    typename F::held slot{};
+    slot.refText = ar.stash(r);
+    return store<F, A>(o, std::move(slot));
   } else {
     return store<F, A>(o, std::forward<Res>(r));
   }
@@ -293,7 +292,8 @@ struct payload_rule<C, R, true> {
 // One source of one directive: the value is what the rule produces, and
 // the member takes it through its own alternative when it is a variant.
 template <class C, class F, class S>
-Write one_text([[maybe_unused]] typename F::owner& o,
+Write one_text([[maybe_unused]] WalkTree& ar,
+               [[maybe_unused]] typename F::owner& o,
                [[maybe_unused]] ElementId payload,
                [[maybe_unused]] bool fallback,
                [[maybe_unused]] std::string_view text) {
@@ -310,9 +310,19 @@ Write one_text([[maybe_unused]] typename F::owner& o,
         typename F::member, typename F::held,
         cursiv::detail::text_payload<RR>>::type;
     using CR = cursiv::detail::converter_rule_t<RR>;
-    if constexpr (!std::is_void_v<CR>) {
+    if constexpr (cursiv::detail::is_ref_content(F::content)) {
+      // A terminal has one part. A joined data rule no longer has its part boundaries.
+      if constexpr (std::is_void_v<CR>)
+        return accept<F, A>(ar, o, text);
+      else if constexpr (!cursiv::detail::HasConverter<CR> ||
+                         (cursiv::detail::is_data_rule<RR> &&
+                          cursiv::detail::ConvertsParts<CR>))
+        return Write::NotModelled;
+      else
+        return accept<F, A>(ar, o, convert_leaf<CR>(text));
+    } else if constexpr (!std::is_void_v<CR>) {
       if constexpr (cursiv::detail::ConvertsText<CR>) {
-        return accept<F, A>(o, CR::convert(text));
+        return accept<F, A>(ar, o, CR::convert(text));
       } else {
         // A converter reading `Parts`, or a value a data rule passes on, is
         // not modelled.
@@ -322,7 +332,7 @@ Write one_text([[maybe_unused]] typename F::owner& o,
                          !cursiv::detail::has_default_convert<A>) {
       return Write::NotModelled;
     } else {
-      return accept<F, A>(o, default_convert<A>(text));
+      return accept<F, A>(ar, o, default_convert<A>(text));
     }
   }
 }
@@ -331,23 +341,25 @@ template <class C, class F, class L>
 struct text_sources;
 template <class C, class F, class... Ss>
 struct text_sources<C, F, TypeList<Ss...>> {
-  static Write run([[maybe_unused]] typename F::owner& o,
+  static Write run([[maybe_unused]] WalkTree& ar,
+                   [[maybe_unused]] typename F::owner& o,
                    [[maybe_unused]] ElementId payload,
                    [[maybe_unused]] std::string_view text) {
     bool done = false;
     // The rule that spelled it first, the bare matcher only if none did.
     ((done = done ||
-             one_text<C, F, Ss>(o, payload, false, text) == Write::Modelled),
+             one_text<C, F, Ss>(ar, o, payload, false, text) == Write::Modelled),
      ...);
     ((done = done ||
-             one_text<C, F, Ss>(o, payload, true, text) == Write::Modelled),
+             one_text<C, F, Ss>(ar, o, payload, true, text) == Write::Modelled),
      ...);
     return done ? Write::Modelled : Write::NotModelled;
   }
 };
 
 template <class C, class E>
-Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
+Write write_text_of([[maybe_unused]] WalkTree& ar, AstNode& owner,
+                    [[maybe_unused]] ElementId payload,
                     [[maybe_unused]] std::string_view text) {
   using D = directive<E>;
   using F = cursiv::detail::field_tag<D::ptr>;
@@ -356,16 +368,11 @@ Write write_text_of(AstNode& owner, [[maybe_unused]] ElementId payload,
 
   if constexpr (D::enable) {
     return store<F, typename F::held>(o, true);
-  } else if constexpr (cursiv::detail::is_ref_content(F::content)) {
-    // A reference is judged on its text: the name is what the document
-    // spells, and resolving it is the linker's verdict, not the walk's.
-    typename F::held slot{};
-    slot.refText = text;
-    return store<F, typename F::held>(o, std::move(slot));
   } else {
+    if constexpr (!cursiv::detail::is_ref_content(F::content)) text = ar.stash(text);
     return text_sources<C, F,
                         typename cursiv::detail::payload_of<
-                            typename D::payload>::type>::run(o, payload, text);
+                            typename D::payload>::type>::run(ar, o, payload, text);
   }
 }
 
@@ -554,7 +561,7 @@ consteval NodeFn node_entry() {
 template <class C, class E>
 consteval TextFn text_entry() {
   using T = std::remove_cvref_t<E>;
-  if constexpr (directive<T>::is_one) return &write_text_of<C, T>;
+  if constexpr (requires { typename directive<T>::payload; }) return &write_text_of<C, T>;
   return nullptr;
 }
 
@@ -674,11 +681,11 @@ struct CursivActions final : GrammarActions {
     return Rows::kNode[e](owner, child);
   }
 
-  Write writeText(ElementId e, ElementId payload, AstNode& owner,
+  Write writeText(ElementId e, ElementId payload, WalkTree& ar, AstNode& owner,
                   std::string_view text) const override {
     if (e >= Rows::kText.size() || Rows::kText[e] == nullptr)
       return Write::NotModelled;
-    return Rows::kText[e](owner, payload, text);
+    return Rows::kText[e](ar, owner, payload, text);
   }
 
   [[nodiscard]] std::optional<std::string> denote(

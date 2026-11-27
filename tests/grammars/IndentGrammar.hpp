@@ -388,6 +388,41 @@ struct G : joined::Words {
 };
 }  // namespace marked
 
+// A head the mark after its suite tells, over a line read as `a b` or as
+// `ab`: the longer token stands, however many levels closed before the line.
+namespace apart {
+struct G : joined::Words {
+  struct Stmt;
+  struct Head : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  static constexpr auto suite = lit<":"> + ref<NEWLINE> + ref<INDENT> +
+                                some(append<&ast::Node::body>(ref<Stmt>)) + ref<DEDENT>;
+  struct Stmt : rule<create<ast::Node>(
+                    (append<&ast::Node::body>(ref<Head>) + lit<"="> + lit<"a"> + lit<"b"> +
+                     ref<NEWLINE>) |
+                    (append<&ast::Node::body>(ref<Head>) + suite + lit<"+"> + ref<NEWLINE>) |
+                    (assign<&ast::Node::name>(ref<ID>) +
+                     (suite | (option(lit<"="> + lit<"ab">) + ref<NEWLINE>))))> {};
+  struct Root : rule<create<ast::Node>(many(append<&ast::Node::body>(ref<Stmt>)))> {};
+};
+}  // namespace apart
+
+// Two heads read the same over a deep block and the pick after it, told apart
+// by the mark at the end; the pick reads `a b` or the longer `ab`.
+namespace picked {
+struct G : marked::G {
+  struct Line;
+  struct Line : rule<ref<ID> + ref<NEWLINE> + option(ref<INDENT> + some(ref<Line>) + ref<DEDENT>)> {};
+  struct First : rule<create<ast::Node>(assign<&ast::Node::name>(lit<"x">))> {};
+  struct Pick : rule<create<ast::Node>(
+                    (append<&ast::Node::body>(ref<First>) + lit<"q"> + lit<"a"> + lit<"b">) |
+                    (assign<&ast::Node::name>(lit<"x">) + lit<"q"> + lit<"ab">))> {};
+  static constexpr auto rest = ref<NEWLINE> + ref<INDENT> + some(ref<Line>) + ref<DEDENT> +
+                               append<&ast::Node::body>(ref<Pick>);
+  struct Root : rule<create<ast::Node>((append<&ast::Node::body>(ref<Plus>) + rest + lit<"!">) |
+                                       (append<&ast::Node::body>(ref<Minus>) + rest + lit<"?">))> {};
+};
+}  // namespace picked
+
 // Arguments in brackets, named or not, which the token after the name tells
 // apart: a choice in the deepest block costs what it reads.
 namespace named {
@@ -411,31 +446,57 @@ struct G : Plain {
 }  // namespace named
 
 // The bracket, newline and suite cases use the same lexical policy. Behind
-// `lead`, deeper comment lines before the first statement: a newline after a
-// `#` comment, then `;` comments one token reads from the line's start.
+// `lead`, deeper lines before the first statement: a newline after a `#`
+// comment, then `;` lines a token of content reads from the line's start.
+// Behind `loose`, a body that may stand indented, with suites that take a
+// bare newline as a statement.
 struct G : Plain {
   struct LEAD : terminal<some(many(cr<R"( \t)">) + lit<";"> + many(cr<R"(^\r\n)">) + eol)> {};
+  struct Loose;
+  struct Loose : rule<create<ast::Node>(
+                     assign<&ast::Node::name>(ref<ID>) +
+                     ((lit<":"> + ref<NEWLINE> + ref<INDENT> +
+                       some(append<&ast::Node::body>(ref<Loose>) | ref<NEWLINE>) + ref<DEDENT>) |
+                      ref<NEWLINE> | eof))> {};
+  static constexpr auto loose = some(append<&ast::Node::body>(ref<Loose>));
   struct Case : rule<ref<Plain::Root> | (kw<"joined"> + ref<joined::G::Top>) |
                      (kw<"guarded"> + ref<guarded::G::Root>) |
                      (kw<"single"> + ref<single::G::Root>) |
                      (kw<"named"> + ref<named::G::Root>) |
                      (kw<"lead"> + ref<NEWLINE> + option(ref<NEWLINE>) + option(ref<LEAD>) +
-                      ref<Plain::Root>)> {};
+                      ref<Plain::Root>) |
+                     (kw<"loose"> + ref<NEWLINE> + option(ref<NEWLINE>) +
+                      create<ast::Node>((ref<INDENT> + loose + ref<DEDENT>) | loose))> {};
   using entry = Case;
 };
 
 namespace folded {
-// Behind `crlf`, a blank that reads CR LF alone: inside brackets a lone LF is
-// a blank all the same.
+// Behind `crlf`, a blank that reads CR LF alone, and behind `touch`, tests of
+// the gap, alone or in an implied token's condition: inside brackets a lone LF
+// is a blank all the same, which a gap holds with the comments around it.
 struct Cases : G {
   struct CRLF : terminal<lit<"\r\n">> {};
+  struct NOTE : terminal<lit<"/*"> + many(cr<"^*">) + lit<"*/">> {};
   struct Word : rule<create<ast::Node>(assign<&ast::Node::name>(ref<ID>))> {};
+  // After a tilde the mark may belong to the loop or to its guarded caller.
+  struct Empty : rule<create<ast::Node>(option(assign<&ast::Node::name>(lit<"~">) +
+                                               many(lit<"!"> | lit<"?"> | lit<";">)))> {};
   struct Case : rule<ref<G::Root> |
                      (kw<"validation"> + ref<validation::G::Root>) |
                      (kw<"crlf"> + skip(ignore<WS, CRLF>, hide<>,
                                         create<ast::Node>(lit<"("> +
                                                           append<&ast::Node::body>(ref<Word>) +
-                                                          lit<")"> + ref<NEWLINE>)))> {};
+                                                          lit<")"> + ref<NEWLINE>))) |
+                     (kw<"touch"> +
+                      skip(ignore<WS>, hide<COMMENT, NOTE>,
+                           create<ast::Node>(
+                               lit<"("> + append<&ast::Node::body>(ref<Word>) +
+                               append<&ast::Node::body>(ref<Empty>) +
+                               ((gap::none + lit<"!">) | (gap::is(eol) + lit<"?">) |
+                                (gap::has(lit<"*/\n/*">) + lit<";">) |
+                                (implied(lit<"@">, gap::is(eol) + &(lit<"%"> + lit<"%">)) +
+                                 lit<"%"> + lit<"%">)) +
+                               lit<")"> + ref<NEWLINE>)))> {};
   using entry = Case;
   static constexpr auto indent_open = lit<"(">;
   static constexpr auto indent_close = lit<")">;
@@ -514,6 +575,8 @@ struct Cases : G {
                      (kw<"dotted"> + ref<dotted::G::Root>) |
                      (kw<"heads"> + ref<heads::G::Root>) |
                      (kw<"marked"> + ref<marked::G::Root>) |
+                     (kw<"apart"> + ref<apart::G::Root>) |
+                     (kw<"picked"> + ref<picked::G::Root>) |
                      (kw<"ending"> + ref<ending::G::Root>) |
                      (kw<"bare"> + ref<bare::G::Root>)> {};
   using entry = Case;

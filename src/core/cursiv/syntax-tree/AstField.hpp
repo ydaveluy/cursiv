@@ -53,16 +53,19 @@ inline constexpr bool is_variant_v = false;
 template <class... Ts>
 inline constexpr bool is_variant_v<std::variant<Ts...>> = true;
 
-// A string is not a container here: it has a `value_type` too, and belongs to
-// the value vocabulary. Only the vocabulary's own list form is a container.
+// What a member's storage holds: `type` under one optional or list, `bare`
+// under all of them. A string is not a list here: it has a `value_type` too,
+// and belongs to the value vocabulary.
 template <class M>
 struct strip_storage {
   using type = M;
+  using bare = M;
   static constexpr FieldStorage storage = FieldStorage::direct;
 };
 template <class X>
 struct strip_storage<std::optional<X>> {
   using type = X;
+  using bare = typename strip_storage<X>::bare;
   static constexpr FieldStorage storage = FieldStorage::optional;
 };
 template <class X, class A>
@@ -72,6 +75,7 @@ struct strip_storage<std::vector<X, A>> {
                 "`vector<Person*>`, not `vector<Person>`. A node is built in "
                 "the tree and is never copied into a list");
   using type = X;
+  using bare = typename strip_storage<X>::bare;
   static constexpr FieldStorage storage = FieldStorage::vector;
 };
 
@@ -110,13 +114,16 @@ void add_held(M& member, Args&&... args) {
 }
 
 // Puts a finished value into a member. A value of the member's own type
-// replaces it whole. Anything else makes what the member holds, the alternative
-// `A` of a variant.
+// replaces it whole, an optional's value built in place. Anything else makes
+// what the member holds, the alternative `A` of a variant.
 template <class A, class M, class V>
 void place(M& member, V&& value) {
   using Held = typename strip_storage<M>::type;
   using T = std::remove_cvref_t<V>;
-  if constexpr (std::is_same_v<T, M>) {
+  if constexpr (std::is_same_v<T, M> && strip_storage<M>::storage == FieldStorage::optional) {
+    member.reset();
+    if (value) add_held(member, *std::forward<V>(value));
+  } else if constexpr (std::is_same_v<T, M>) {
     member = std::forward<V>(value);
   } else if constexpr (strip_storage<M>::storage != FieldStorage::direct) {
     if constexpr (is_variant_v<Held> && !std::is_same_v<T, Held>)

@@ -209,6 +209,8 @@ struct Base : cursiv::GrammarSpec {
   struct Guarded : terminal<lit<"g", !lit<"x">> + option(ref<Guarded>)> {};
   struct EndGuarded : terminal<lit<"q", eof> + option(ref<EndGuarded>)> {};
   struct Nested : terminal<lit<"("> + option(ref<Nested>) + lit<")">> {};
+  // Each call ends at every second place of a run of `a`.
+  struct Odd : terminal<lit<"a"> + option(ref<Odd> + lit<"a">)> {};
 
   template <class T>
   static constexpr auto Read = assign<&Node::text>(ref<T>);
@@ -229,7 +231,8 @@ struct Base : cursiv::GrammarSpec {
                                   (lit<"marked:"> + Read<Marked>) |
                                   (lit<"guarded:"> + Read<Guarded>) |
                                   (lit<"end:"> + Read<EndGuarded>) |
-                                  (lit<"nested:"> + Read<Nested>))> {};
+                                  (lit<"nested:"> + Read<Nested>) |
+                                  (lit<"odd:"> + Read<Odd>))> {};
   using entry = Root;
 };
 }  // namespace trightlinear

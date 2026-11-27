@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include "asi/generated/G/Module.hpp"
 #include "cursiv/Check.hpp"
@@ -36,6 +37,13 @@ using Plain = std::remove_cvref_t<E>;
 using ScopedKeyword = cursiv::detail::scoped_t<
     finfix::InfixEntryG, Plain<decltype(finfix::InfixEntryG::kw<"if">)>>;
 static_assert(cursiv::fuzzer::detail::model::text_of<ScopedKeyword>::value == "if");
+using FuzzGrammar = finfix::InfixEntryG;
+using Nested = decltype(FuzzGrammar::nest<finfix::ast::Bin, &finfix::ast::Bin::left>(FuzzGrammar::lit<"+">));
+static_assert(cursiv::fuzzer::detail::text_entry<FuzzGrammar, Nested>() == nullptr);
+static_assert(cursiv::fuzzer::detail::model::kind_of<decltype(FuzzGrammar::indent)>() ==
+              cursiv::fuzzer::detail::ElementKind::layout);
+static_assert(cursiv::fuzzer::detail::model::kind_of<FuzzGrammar::terminal<FuzzGrammar::dedent>>() ==
+              cursiv::fuzzer::detail::ElementKind::layout);
 static_assert(cursiv::fuzzer::detail::Spell<finfix::InfixEntryG, ScopedKeyword, 0>::min == 2);
 static_assert(std::is_same_v<ClosedBy<decltype(cursiv::GrammarSpec::lit<"*/"> |
                                                cursiv::GrammarSpec::eof)>,
@@ -155,7 +163,7 @@ void a_long_repetition_costs_its_rounds() {
     }
   };
   const fd::GrammarCost cost(Model{}, fd::kActions<finfix::InfixEntryG>);
-  CHECK(cost[1] == 4096 && cost[0] == 4096);
+  CHECK(cost[1].tokens == 4096 && cost[0].tokens == 4096);
 }
 
 // A word, then a number: the separator the walk writes between them is a tab.
@@ -185,9 +193,7 @@ struct Tight : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
 };
-// No trivia, so tokens follow one another: a keyword's word boundary refuses
-// a word after it but not a bracket, and a guard that is no class refuses the
-// literal.
+// Adjacent tokens must satisfy the previous token's guard.
 struct Glued : cursiv::GrammarSpec {
   struct WORD : terminal<some(cr<"a-z">)> {};
   struct Root : rule<create<Doc>(kw<"go"> + assign<&Doc::word>(ref<WORD>))> {};
@@ -197,8 +203,128 @@ struct Opened : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(kw<"go"> + lit<"(">)> {};
   using entry = Root;
 };
-struct Unheld : cursiv::GrammarSpec {
+struct Guarded : cursiv::GrammarSpec {
   struct Root : rule<create<Doc>(lit<"go", !lit<"x">> + lit<"(">)> {};
+  using entry = Root;
+};
+struct Layout : cursiv::GrammarSpec {
+  struct WS : terminal<lit<" ">> {};
+  struct Root : rule<create<Doc>(lit<"x"> + lit<"\n"> +
+                                 (lit<"y"> | (indent + lit<"z"> + dedent)) +
+                                 lit<"w">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct LineComment : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Line : terminal<lit<"!"> + many(cr<R"(^\r\n)">)> {};
+  struct Root : rule<create<Doc>(ref<Line> + lit<"x">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct LineDirective : cursiv::GrammarSpec {
+  struct Line : terminal<lit<"#"> + many(cr<R"(^\r\n)">) + option(eol)> {};
+  struct Root : rule<create<Doc>(ref<Line> + lit<";">)> {};
+  using entry = Root;
+};
+struct NamedLiteral : cursiv::GrammarSpec {
+  struct X : terminal<lit<"x">> {};
+  struct Root : rule<create<Doc>(ref<X> + lit<";"> + lit<"x">)> {};
+  using entry = Root;
+};
+struct SharedPrefix : cursiv::GrammarSpec {
+  struct A : terminal<cr<"a">> {};
+  struct Word : terminal<ref<A> | lit<"ab">> {};
+  struct Root : rule<create<Doc>(ref<Word> + lit<"b">)> {};
+  using entry = Root;
+};
+struct TerminalAlias : SharedPrefix {
+  struct Alias : terminal<ref<A>> {};
+  struct Root : rule<create<Doc>(ref<Alias>)> {};
+  using entry = Root;
+};
+struct SpacedPrefix : SharedPrefix {
+  struct WS : terminal<lit<" ">> {};
+  using ignored = WS;
+};
+struct VisibleSpace : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<create<Doc>(lit<"["> + tight(option(ref<WS>) + lit<"x"> + lit<"]">))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct Adjacent : cursiv::GrammarSpec {
+  struct WS : terminal<lit<" ">> {};
+  struct Root : rule<create<Doc>(lit<"("> + gap::none + cr<"a-z"> +
+                                 gap::none + any + lit<")"> + lit<";">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct NullableTail : cursiv::GrammarSpec {
+  struct Stop : rule<create<Doc>> {};
+  struct Tail : rule<(lit<"x"> + ref<Tail>) | ref<Stop>> {};
+  using entry = Tail;
+};
+struct ConditionalTail : cursiv::GrammarSpec {
+  struct End : rule<&lit<"z"> | eof> {};
+  struct Tail : rule<(lit<"x"> + ref<Tail>) | ref<End> | lit<";">> {};
+  struct Root : rule<create<Doc>(ref<Tail> + lit<"z">)> {};
+  using entry = Root;
+};
+struct Digits : cursiv::GrammarSpec {
+  struct Number : terminal<some(d)> {};
+  struct Root : rule<create<Doc>(ref<Number> + ref<Number>)> {};
+  using entry = Root;
+};
+struct SpacedDigits : Digits {
+  struct WS : terminal<some(s)> {};
+  using ignored = WS;
+};
+struct CommentTail : cursiv::GrammarSpec {
+  struct Comment : terminal<lit<"#"> + many(cr<R"(^\r\n)">)> {};
+  struct Root : rule<create<Doc>(ref<Comment> + lit<"x">)> {};
+  using entry = Root;
+};
+struct SeparatedComment : CommentTail {
+  struct WS : terminal<some(s)> {};
+  using ignored = WS;
+};
+struct VisibleBlank : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Blank : terminal<some(cr<" ">)> {};
+  struct Root : rule<create<Doc>(lit<"("> + ref<Blank> + lit<")">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+struct FinalToken : cursiv::GrammarSpec {
+  struct End : terminal<lit<";"> + eof> {};
+  struct Root : rule<create<Doc>(ref<End>)> {};
+  using entry = Root;
+};
+struct PastEnd : FinalToken {
+  struct Root : rule<create<Doc>(ref<End> + lit<"!">)> {};
+  using entry = Root;
+};
+struct FinalTrivia : cursiv::GrammarSpec {
+  struct Comment : terminal<lit<"#"> + eof> {};
+  struct Root : rule<create<Doc>(lit<"x"> + lit<"y">)> {};
+  using entry = Root;
+  using hidden = list<Comment>;
+};
+struct Brackets : cursiv::GrammarSpec {
+  struct Line : terminal<lit<"\n">> {};
+  struct Open : terminal<lit<"(">> {};
+  using indent_newline = Line;
+  static constexpr auto indent_open = ref<Open>;
+  static constexpr auto indent_block = lit<"{">;
+  static constexpr auto indent_close = lit<"}"> | lit<")">;
+  static constexpr auto item = ref<Line> | lit<"x">;
+  struct Root : rule<create<Doc>(ref<Open> + item + lit<"{"> + item +
+                                 lit<"}"> + item + lit<")"> + item)> {};
+  using entry = Root;
+};
+struct ForcedLine : Brackets {
+  struct Root : rule<create<Doc>(ref<Open> + ref<Line> + lit<")">)> {};
   using entry = Root;
 };
 }  // namespace fveto
@@ -249,17 +375,16 @@ void a_literal_guard_holds_after_its_text() {
                 cursiv::GrammarSpec::cr<"0~">) == "if~");
   CHECK(spelled(cursiv::GrammarSpec::kw<"["> + cursiv::GrammarSpec::cr<"0~">) ==
         "[0");
-  CHECK(spelled(cursiv::GrammarSpec::lit<"a", !cursiv::GrammarSpec::lit<"b">> +
-                cursiv::GrammarSpec::cr<"b-c">) == std::nullopt);
+  CHECK(spelled(G::lit<"a", !G::lit<"b">> + G::cr<"b-c">) == "ac");
+  CHECK(spelled(!(G::ikw<"IF"> | G::lit<"j">) + G::cr<"i-k">) == "k");
   CHECK(spelled<G>(
             cursiv::GrammarSpec::lit<"a", !cursiv::GrammarSpec::ref<G::NUM>> +
             cursiv::GrammarSpec::cr<"b">) == std::nullopt);
 }
 
-// Whether the walk writes a sentence of `G` with the first choice of every
-// decision: what a token's last assertion refuses holds for the byte after it.
+// The sentence obtained from the first choice at every decision.
 template <class G>
-bool walks_a_sentence() {
+std::optional<std::string> first_sentence() {
   namespace fd = cursiv::fuzzer::detail;
   const fd::GrammarCost cost(fd::kDeclaredModel<G>, fd::kActions<G>);
   const fd::GrammarGenerator gen{fd::kDeclaredModel<G>,
@@ -270,7 +395,9 @@ bool walks_a_sentence() {
                                  nullptr};
   fd::FixedSource first;
   cursiv::fuzzer::WalkTree tree;
-  return gen.generate(first, tree).complete;
+  auto sentence = gen.generate(first, tree);
+  if (!sentence.complete) return std::nullopt;
+  return std::move(sentence.text);
 }
 
 // A level that groups nothing: two of its operators are no expression.
@@ -323,16 +450,25 @@ void a_non_associative_level_is_not_chained() {
   CHECK(std::ranges::count(d.text, '<') == 1);
 }
 
-// A node an operand creates is the member's value: the rule still builds
-// its own node.
+// After adoption a write targets the adopted node and builds its operand separately.
 namespace finline {
 struct Child : cursiv::Extends<cursiv::AstNode> {};
 struct Root : cursiv::Extends<cursiv::AstNode> {
   Child* child = nullptr;
+  vector<reference<Child>> names;
+  bool marked = false;
+  bool empty = false;
 };
 struct G : cursiv::GrammarSpec {
+  struct Name : terminal<as<&finfix::from_parts>(lit<"n">)> {};
+  struct Refused : terminal<as<&finfix::checked>(lit<"no">)> {};
+  struct Head : rule<create<Root>(lit<"h">)> {};
   struct Top
-      : rule<create<Root>(assign<&Root::child>(create<Child>(lit<"x">)))> {};
+      : rule<flag<&Root::marked>(ref<Head> + lit<":"> +
+                                 assign<&Root::child>(create<Child>(lit<"x">))) +
+             append<&Root::names>(ref<Name>) + append<&Root::names>(ref<Refused>) +
+             append<&Root::names>(lit<"z">) +
+             flag<&Root::empty>(eof)> {};
   using entry = Top;
 };
 }  // namespace finline
@@ -352,7 +488,10 @@ void an_operand_builds_the_value_of_its_member() {
   const fd::GrammarDerivation d = gen.generate(first, tree);
   CHECK(d.complete);
   const auto* const root = cursiv::ast_cast<finline::Root>(d.tree);
-  CHECK(root != nullptr && root->child != nullptr);
+  CHECK(root != nullptr && root->child != nullptr && root->marked && root->empty);
+  CHECK(root && root->names.size() == 2 && root->names[0].refText == "parts:n" &&
+        root->names[1].refText == "z");
+  CHECK(d.unwritten.empty());
 }
 
 // Two values a floating type tells apart never read as one.
@@ -367,12 +506,35 @@ void a_wide_float_is_not_read_as_a_double() {
 }
 
 int main() {
+  CHECK(cursiv::fuzzer::detail::shown(std::string_view{"a\0b\n\\x00", 8}) ==
+        "a\\x00b\\x0a\\\\x00");
   a_subtree_holds_its_children_whole();
-  CHECK(walks_a_sentence<fveto::Spaced>());
-  CHECK(!walks_a_sentence<fveto::Tight>());
-  CHECK(!walks_a_sentence<fveto::Glued>());
-  CHECK(walks_a_sentence<fveto::Opened>());
-  CHECK(!walks_a_sentence<fveto::Unheld>());
+  CHECK(first_sentence<fveto::Spaced>());
+  CHECK(!first_sentence<fveto::Tight>());
+  CHECK(!first_sentence<fveto::Glued>());
+  CHECK(first_sentence<fveto::Opened>());
+  CHECK(first_sentence<fveto::Guarded>() == "go(");
+  CHECK(first_sentence<fveto::Adjacent>() == "(a!) ;");
+  CHECK(first_sentence<fveto::NullableTail>() == "xxxxxxxx");
+  CHECK(first_sentence<fveto::ConditionalTail>() == "xxxxxxxx;z");
+  CHECK(!first_sentence<fveto::Digits>());
+  CHECK(first_sentence<fveto::SpacedDigits>() == "0\t0");
+  CHECK(!first_sentence<fveto::CommentTail>());
+  CHECK(first_sentence<fveto::SeparatedComment>() == "#\nx");
+  CHECK(first_sentence<fveto::VisibleBlank>() == "( )");
+  CHECK(first_sentence<fveto::FinalToken>() == ";");
+  CHECK(!first_sentence<fveto::PastEnd>());
+  CHECK(first_sentence<fveto::FinalTrivia>() == "xy");
+  CHECK(first_sentence<fveto::Layout>() == "x \ny w");
+  CHECK(first_sentence<fveto::LineComment>() == "!\nx");
+  CHECK(first_sentence<fveto::LineDirective>() == "#\n;");
+  CHECK(first_sentence<fveto::NamedLiteral>() == "x;x");
+  CHECK(!first_sentence<fveto::SharedPrefix>());
+  CHECK(first_sentence<fveto::TerminalAlias>() == "a");
+  CHECK(first_sentence<fveto::SpacedPrefix>() == "a b");
+  CHECK(first_sentence<fveto::VisibleSpace>() == "[x]");
+  CHECK(first_sentence<fveto::Brackets>() == "(x{\n}x)\n");
+  CHECK(!first_sentence<fveto::ForcedLine>());
   a_long_repetition_costs_its_rounds();
   a_refusal_holds_for_the_next_character();
   a_literal_guard_holds_after_its_text();

@@ -47,7 +47,8 @@ void run() {
   }
   for (const auto* parser : {lr.get(), aux.get()}) {
     for (const std::string_view source :
-         {"inner", "inner   ", "ref-inner   ", "node   ", "directx", "callx"}) {
+         {"inner", "inner   ", "ref-inner   ", "node   ", "directx", "callx",
+          "choice:", "choice:x", "choice:#", "choice:x##", "choice: y", "more: "}) {
       const std::string input = "chain:" + std::string(source);
       const auto result = parser->parse(input);
       CHECK(result.accepted && !result.cst().recovered() &&
@@ -61,7 +62,8 @@ void run() {
       }
     }
     for (const std::string_view source :
-         {"outer   ", "ref-outer   ", "directx   ", "callx   "}) {
+         {"outer   ", "ref-outer   ", "directx   ", "callx   ", "choice: ", "choice:# ",
+          "choice: #", "choice:y ", "more:"}) {
       const std::string input = "chain:" + std::string(source);
       const auto result = parser->parse(input);
       CHECK(!result.accepted || result.cst().recovered() ||

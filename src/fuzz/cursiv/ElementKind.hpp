@@ -19,8 +19,10 @@ enum class ElementKind : std::uint8_t {
   literal,
   character_range,
   any_character,
+  layout,  // a virtual indentation token
   // Directives: what the match does to the AST.
   assignment,
+  flag,
   create,
   nest,
   // Structure.
@@ -35,6 +37,7 @@ enum class ElementKind : std::uint8_t {
   unordered_choice,
   through,
   skip_region,
+  empty_gap,
   // The two reserved rows every table ends with.
   trivia,
   error,

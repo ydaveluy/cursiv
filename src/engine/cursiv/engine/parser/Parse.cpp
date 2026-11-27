@@ -25,7 +25,94 @@ void Machine::flush() {
     f[-1].open = after;
 }
 
+void Machine::capture_prefix(NodeCount open) {
+  if (!prefixes) prefixes = std::make_unique<Prefixes>();
+  auto& log = *prefixes;
+  const auto level = static_cast<std::size_t>(top - frames);
+  if (log.levels.size() <= level) log.levels.resize(level + 1);
+  const auto count = tape.records() - open;
+  const auto begin = log.records.size();
+  if (count) log.records.insert(log.records.end(), tape.data() + open, tape.data() + open + count);
+  log.captures.push_back({level, log.levels[level], begin, open, count});
+  log.levels[level] = log.captures.size() - 1;
+  tape.truncate(open);
+}
+
+void Machine::recall_prefix(NodeCount open, std::uint32_t depth) {
+  auto& log = *prefixes;
+  const auto& cap = log.captures[log.levels[static_cast<std::size_t>(top - frames) - depth - 1]];
+  if (!cap.count) return;
+  const auto from = tape.records();
+  const auto where = from == 0 ? log.records[cap.begin].begin : tape.at(from - 1).end;
+  log.recalls.push_back({open, from, cap.count, cap.begin});
+  for (NodeCount i = 0; i < cap.count; ++i) {
+    const auto& record = log.records[cap.begin + i];
+    tape.close(where, where, record.subtreeSize, record.element());
+    tape.at(from + i).setEngine(record.engine());
+  }
+  if (!tape.room()) tape.makeRoom(std::size_t{tape.records()} + 1);
+}
+
+void Machine::place_prefixes() {
+  const auto n = tape.records();
+  // Link each newly written block before its operand in constant time.
+  std::vector<NodeCount> first(n), prev(n);
+  NodeCount tail = kNoNode, at = 0;
+  unsigned work = 0;
+  const auto watch = [&] { if ((++work & 4095u) == 0) throwIfCancelled(stop); };
+  const auto append = [&](NodeCount end) {
+    while (at < end) {
+      watch();
+      first[at] = at;
+      prev[at] = tail;
+      tail = at++;
+    }
+  };
+  for (const auto& moved : prefixes->recalls) {
+    append(moved.from);
+    const auto end = at + moved.count;
+    const auto last = tail;
+    if (moved.open < at) tail = prev[first[moved.open]];
+    for (NodeCount i = 0; i < moved.count; ++i) {
+      auto& node = tape.at(at + i);
+      const auto& original = prefixes->records[moved.source + i];
+      node.begin = original.begin;
+      node.end = original.end;
+    }
+    append(end);
+    if (moved.open < moved.from) {
+      prev[first[moved.open]] = tail;
+      first[moved.open] = moved.from;
+      tail = last;
+    }
+  }
+  append(n);
+  for (NodeCount i = n; i-- > 0; tail = prev[tail]) { watch(); first[i] = tail; }
+  for (NodeCount i = 0; i < n; ++i) {
+    if (first[i] == i) continue;
+    const auto saved = tape.at(i);
+    auto at = i;
+    while (first[at] != i) {
+      watch();
+      const auto from = std::exchange(first[at], at);
+      tape.at(at) = tape.at(from);
+      at = from;
+    }
+    first[at] = at;
+    tape.at(at) = saved;
+  }
+  for (NodeCount i = 0; i < n; ++i) {
+    watch();
+    auto& node = tape.at(i);
+    if (node.subtreeSize > 1) {
+      node.begin = tape.at(i + 1 - node.subtreeSize).begin;
+      node.end = tape.at(i - 1).end;
+    }
+  }
+}
+
 void Machine::accept() {
+  if (prefixes && !prefixes->recalls.empty()) place_prefixes();
   root = tape.records() - 1;
   flush();
   const auto skipped = [&](NodeCount id) { return tape.at(id).element() == kSkippedElement; };
@@ -94,7 +181,11 @@ std::size_t Machine::standing(NodeCount records) const {
 }
 
 void Machine::checkpoint(Checkpoint& made) const {
-  const std::size_t kept = std::min(standing(made.records), made.frames.size());
+  NodeCount intact = made.records;
+  if (prefixes)
+    for (auto i = made.captures; i < prefixes->captures.size(); ++i)
+      intact = std::min(intact, prefixes->captures[i].open);
+  const std::size_t kept = std::min(standing(intact), made.frames.size());
   const NodeCount from = kept != made.frames.size() ? made.frames[kept].open : made.records;
   while (!made.words.empty() && made.words.back().first >= from) made.words.pop_back();
   made.frames.resize(kept);
@@ -111,6 +202,10 @@ void Machine::checkpoint(Checkpoint& made) const {
   made.plan = plan;
   made.planned = planned;
   made.records = tape.records();
+  if (prefixes) {
+    made.captures = prefixes->captures.size();
+    made.recalls = prefixes->recalls.size();
+  }
   made.at = static_cast<TextOffset>(at - src);
   made.tok = tok;
   made.resume = resume;
@@ -118,6 +213,21 @@ void Machine::checkpoint(Checkpoint& made) const {
 }
 
 void Machine::rewind(const Checkpoint& to) {
+  if (prefixes) {
+    auto& log = *prefixes;
+    log.recalls.resize(to.recalls);
+    while (log.captures.size() > to.captures) {
+      const auto saved = log.captures.back();
+      log.levels[saved.level] = saved.previous;
+      if (saved.open < to.records) {
+        const auto count = std::min(saved.count, to.records - saved.open);
+        while (tape.records() < saved.open + count) tape.leaf(0, 0, kNoElement);
+        for (NodeCount i = 0; i < count; ++i) tape.at(saved.open + i) = log.records[saved.begin + i];
+      }
+      log.records.resize(saved.begin);
+      log.captures.pop_back();
+    }
+  }
   std::ranges::copy(to.frames, frames);
   top = frames + to.frames.size();
   tape.truncate(to.records);
@@ -198,13 +308,12 @@ Token Machine::line_in_trivia(const char* p, Token tok, std::uint32_t state, Ind
     const Token x = walk(q, mode, 1, q);
     if (x.end <= q) break;
     if (t.inSet(t.newlineIn, x.terminal()) && line_between(q, x.end, at)) {
-      // The trivia's line end, moved to the gap's last byte: the terminal the
-      // state reads there where it reads that line end alone, its guard deciding.
-      const Token line = walk(next - 1, mode, t.transition(1, t.byteClass['\n']), next);
-      const std::uint16_t as = line.terminal();
-      return line.end == next && as < t.terminalCount && t.terminalTrivia[as] == Trivia::none &&
-                     t.inSet(t.followOf[state], as)
-                 ? token(tok.begin(*this), next, as)
+      // The trivia's line end, moved to the gap's last byte: the line's
+      // terminal or a copy the state reads there alone, its guard deciding.
+      const Token line = line_at(next, mode);
+      return line.end == next && line.terminal() < t.terminalCount &&
+                     t.inSet(t.lines, line.terminal()) && t.inSet(t.followOf[state], line.terminal())
+                 ? token(tok.begin(*this), next, line.terminal())
                  : tok;
     }
     q = x.end;
@@ -261,11 +370,13 @@ Token Machine::indentation(const char* p, Indented& at) {
   return fault;
 }
 
-bool Machine::first_ends_line(const char* p, std::uint16_t mode) {
+bool Machine::walks_to_line(const char* p, std::uint16_t mode) {
   for (const char* q = p;;) {
+    // The end of the text ends the line as its terminal does.
+    if (q == end) return ended == kEndOfInput;
     const Token x = walk(q, mode, 1, q);
     if (x.end <= q || x.terminal() >= t.terminalCount) return false;
-    if (t.terminalTrivia[x.terminal()] == Trivia::none) return line_start(x.end);
+    if (t.terminalTrivia[x.terminal()] == Trivia::none) return t.inSet(t.lines, x.terminal());
     q = x.end;
   }
 }
@@ -285,7 +396,7 @@ bool Machine::gap_reads(std::uint32_t monitor, const char* from, const char* to,
       if (state == 0) return false;
     }
   }
-  return (m.flags[state] & (whole ? 2 : 3)) != 0;
+  return (m.flags[state] & (whole ? 4 : 2)) != 0;
 }
 
 bool Machine::settles(std::uint32_t list, const char* p, LexWork* work) {
@@ -359,6 +470,7 @@ bool Machine::reads_tied(Token tok, std::uint16_t terminal) const {
 }
 
 std::uint32_t Machine::ending(Token tok) const {
+  if (carried_line(tok)) return t.lexStates[t.transition(1, t.byteClass['\n'])].accept;
   if (endingEnd == tok.end && endingBegin == tok.begin(*this)) return endingSet;
   std::uint32_t state = 1;
   const char* p = src + tok.begin(*this);
@@ -380,7 +492,7 @@ bool Machine::tied(Token tok, std::uint32_t tie) const {
 
 bool Machine::reads_as(Token tok, std::uint32_t mode, std::uint16_t terminal) {
   const char* const begin = src + tok.begin(*this);
-  const Token again = walk(begin, mode, 1, begin);
+  const Token again = carried_line(tok) ? line_at(begin, mode) : walk(begin, mode, 1, begin);
   return again.end == tok.end && again.terminal() == terminal && rank(again) == rank(tok);
 }
 
@@ -601,6 +713,7 @@ bool parse(const Tables& tables, std::string_view text, Cst& cst,
       continue;
     }
     const bool accepted = exit == Exit::accepted || repair(machine, builder);
+    if (!accepted && machine.prefixes && !machine.prefixes->recalls.empty()) machine.place_prefixes();
     builder.finish(accepted ? machine.root : kNoNode, accepted);
     return accepted;
   }

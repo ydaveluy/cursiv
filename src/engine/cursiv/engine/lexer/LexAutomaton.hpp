@@ -59,8 +59,8 @@ struct LexMatcher {
 };
 
 // A condition's automaton as the runtime reads it: `flags[state]` has bit 0
-// where a match ends in the text read, bit 1 where the text read is one if the
-// input ends there.
+// where a match ends in the text read, bit 1 where one does if the input ends
+// there, and bit 2 where the whole text read is one if the input ends there.
 struct LexMonitor {
   std::array<std::uint8_t, 256> classOf{};
   unsigned nclasses = 0;

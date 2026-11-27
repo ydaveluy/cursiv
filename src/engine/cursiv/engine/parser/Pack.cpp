@@ -1,6 +1,7 @@
 #include "cursiv/engine/parser/Pack.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <numeric>
 #include <ranges>
@@ -296,13 +297,20 @@ std::vector<std::uint32_t> election_order(const Cfg& cfg, const std::vector<bool
   return order;
 }
 
-// The terminals passed as trivia under the scopes of `scopes`, a bit a scope.
-Bits trivia_of(const Cfg& cfg, std::uint64_t scopes) {
+// A lexer's scopes contribute their trivia. A shared shift needs one policy.
+Bits trivia_of(const Cfg& cfg, std::uint64_t scopes, std::uint16_t shift = kNoToken) {
   Bits passed(cfg.terminals.size());
-  for (std::size_t r = 0; r < cfg.regions.size(); ++r) {
-    if ((scopes >> r & 1) == 0) continue;
-    for (const std::uint16_t t : cfg.regions[r].ignored) passed.set(t);
-    for (const std::uint16_t t : cfg.regions[r].hidden) passed.set(t);
+  const Region* first = nullptr;
+  while (scopes) {
+    const Region& region = cfg.regions[std::countr_zero(scopes)];
+    scopes &= scopes - 1;
+    if (shift != kNoToken && first &&
+        (region.ignored != first->ignored || region.hidden != first->hidden))
+      throw Refused("the trivia before " + cfg.terminals[shift].name +
+                    " could follow either setting");
+    first = &region;
+    for (const auto t : region.ignored) passed.set(t);
+    for (const auto t : region.hidden) passed.set(t);
   }
   return passed;
 }
@@ -377,7 +385,7 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
       continue;
     const std::uint32_t prod = state.reduces.front().first;
     if (prod != 0 && cfg.productions[prod].rhs.size() == 1 && !cfg.productions[prod].tested() &&
-        !cfg.productions[prod].start && cfg.productions[prod].takes.empty())
+        !cfg.productions[prod].start && !cfg.productions[prod].capture && cfg.productions[prod].takes.empty())
       unit[s] = prod;
   }
   struct Hop {
@@ -484,6 +492,7 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
   Closers needs = closers(cfg, automaton);
   refuse_empty_cycles(cfg, needs.nullable);
   out.nullable = needs.nullable;
+  out.yields = std::move(needs.yields);
   for (std::size_t s = 0; s < nstates; ++s) {
     states[s].close = std::move(needs.rows[s]);
     states[s].kernel = std::move(needs.kernels[s]);
@@ -617,7 +626,7 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
         const auto governed = std::ranges::lower_bound(
             from.governs, terminal, {}, [](const auto& g) { return g.first; });
         if (governed == from.governs.end() || governed->first != terminal) continue;
-        Bits own = trivia_of(cfg, governed->second);
+        Bits own = trivia_of(cfg, governed->second, terminal);
         Bits more = passed[s];
         more.remove(own);
         if (!more.any()) continue;
@@ -734,12 +743,7 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
       if (item.symbol != KernelCost::kNone) asked[item.symbol] = true;
       if (item.lhs != KernelCost::kAccept) completed[item.lhs] = true;
     }
-  out.cornerAt.push_back(0);
-  for (std::size_t nt = 0; nt < nnts; ++nt) {
-    for (auto c = needs.cornerAt[nt]; asked[nt] && c != needs.cornerAt[nt + 1]; ++c)
-      if (completed[needs.corners[c] & 0xFFFF]) out.corners.push_back(needs.corners[c]);
-    out.cornerAt.push_back(static_cast<std::uint32_t>(out.corners.size()));
-  }
+  needs.corners(asked, completed, out.cornerAt, out.corners);
   gaps.resize(gapOf.size());
   for (auto& [set, at] : gapOf) gaps[at] = set;
   return reduced;
@@ -750,7 +754,9 @@ std::vector<bool> reached_states(Cfg& cfg, const LrAutomaton& automaton, Packed&
 std::set<std::uint32_t> record_closes(Cfg& cfg, const std::vector<bool>& reduced, Packed& out) {
   std::set<std::uint32_t> stamped;
   const std::size_t nnts = cfg.nonterminals;
+  cfg.swapRecordInputs();
   const auto children = record_shapes(cfg, out);
+  cfg.swapRecordInputs();
   std::vector<std::set<std::uint32_t>> sites(nnts);
   for (std::size_t nt = 0; nt < nnts; ++nt)
     for (const PackedGoto& site : out.gotos[nt]) sites[nt].insert(site.entry);
@@ -857,10 +863,11 @@ void terminal_sets(const Cfg& cfg, const LexDfa& dfa, Packed& out) {
     }
     out.kernelOf.push_back(list->second);
   }
-  if (!cfg.newlineIn.empty()) {
+  for (auto [from, to] : {std::pair{&cfg.lines, &out.lines}, {&cfg.newlineIn, &out.newlineIn}}) {
+    if (from->empty()) continue;
     follow.clear();
-    for (const std::uint16_t t : cfg.newlineIn) follow.set(t);
-    out.newlineIn = set_of(follow);
+    for (const std::uint16_t t : *from) follow.set(t);
+    *to = set_of(follow);
   }
   Bits peers(nterms);
   for (std::size_t i = 1; i < dfa.acceptSets.size(); ++i) {
@@ -913,6 +920,31 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
                                           [&](const LexAccept& a) { return passed.test(a.term); });
   }
   lines = lines && cfg.newline != 0;
+  // The bytes trivia or the line's terminal may read first past a line's
+  // blanks, starting at any blank or past them; any byte where that terminal
+  // reads blanks alone.
+  if (cfg.newline != 0 && (cfg.indent != 0 || cfg.dedent != 0) && dfa.nstates() >= 2) {
+    Bits lineish = passed;
+    lineish.set(cfg.newline);
+    std::vector<std::uint16_t> blanks{1};
+    std::vector<bool> seen(dfa.nstates());
+    out.lineLeads.assign(256, 0);
+    for (std::size_t i = 0; i < blanks.size(); ++i) {
+      const std::uint16_t s = blanks[i];
+      if (i != 0 && std::ranges::any_of(dfa.acceptSets[dfa.acceptSet[s]],
+                                        [&](const LexAccept& a) { return a.term == cfg.newline; }))
+        out.lineLeads.assign(256, 1);
+      for (unsigned b = 0; b < 256; ++b) {
+        const std::uint16_t to = dfa.next[s * dfa.nclasses + dfa.classOf[b]];
+        if (to == 0) continue;
+        if ((b == ' ' || b == '\t' || b == '\f') && !seen[to]) {
+          seen[to] = true;
+          blanks.push_back(to);
+        }
+        if (dfa.reach[to].intersects(lineish)) out.lineLeads[b] = 1;
+      }
+    }
+  }
   auto& modeTerminals = out.modeTerminals;
   // A mode is what it reads, and of that what only tests name.
   std::map<std::pair<Bits, Bits>, std::uint16_t> modes;
@@ -1379,8 +1411,7 @@ void first_bytes(const Cfg& cfg, const LexDfa& dfa, RunSets& runs, Packed& out) 
   const std::size_t nsets = dfa.acceptSets.size();
   const std::size_t nlex = dfa.nstates();
   const unsigned nclasses = dfa.nclasses;
-  std::map<std::tuple<std::uint16_t, std::uint32_t, std::vector<Spelling>, bool>, std::uint32_t>
-      paths;
+  std::map<WordPath, std::uint32_t> paths;
   std::map<std::vector<std::uint16_t>, std::uint32_t> literalLists;
   std::map<std::tuple<std::uint16_t, Bits, Bits>, std::uint32_t> known;
   out.lexFirst.assign(std::size_t{out.modeCount} * 256, 0);
@@ -1391,16 +1422,10 @@ void first_bytes(const Cfg& cfg, const LexDfa& dfa, RunSets& runs, Packed& out) 
   for (unsigned b = 0; b < 0x80; ++b) ascii.set(dfa.classOf[b]);
   std::vector<std::uint32_t> seen(nlex, 0);
   std::uint32_t stamp = 0;
-  // Per state of a run, how many states lead to it, then how it is spelled;
-  // the state it is led to from, and its byte. Per state, whether it is a
-  // sink.
-  std::vector<std::uint8_t> ins(nlex, 0);
-  std::vector<std::uint16_t> parent(nlex, 0);
-  std::vector<char> letter(nlex, 0);
-  std::vector<bool> sinks(nlex, false);
-  std::vector<ByteSet> classBytes(nclasses);
-  for (unsigned b = 0; b < 256; ++b) classBytes[dfa.classOf[b]].add(b);
-  std::vector<bool> lives(nlex, false);
+  // A positive length is known when every path here follows the same chain
+  // of predecessor states from the first byte of the run.
+  std::vector<std::uint16_t> parent(nlex), length(nlex);
+  std::vector<bool> sinks(nlex, false), lives(nlex, false);
   for (std::uint16_t mode = 0; mode < out.modeCount; ++mode) {
     const Bits& read = out.modeTerminals[mode];
     // The states a terminal of the mode ends in or past, and those one
@@ -1475,9 +1500,8 @@ void first_bytes(const Cfg& cfg, const LexDfa& dfa, RunSets& runs, Packed& out) 
       }
       return word;
     };
-    // A run of the bytes every state from `from` reads on, and where it
-    // stops, the terminal each state reads there: the same in all but states
-    // of one spelling, whose texts the code tests.
+    // All states in the run read the same byte classes. They end the same
+    // token except for states reached at a known length.
     const auto word = [&](std::uint16_t from, WordPath& path, unsigned limit) {
       const Bits& alphabet = limit == 256 ? all : ascii;
       Bits classes = onward(from);
@@ -1537,36 +1561,21 @@ void first_bytes(const Cfg& cfg, const LexDfa& dfa, RunSets& runs, Packed& out) 
         }
         return e;
       };
-      // Per state, how many states lead to it; then whether it has one
-      // spelling (1, or 2 where its byte is a letter in either case), and that
-      // byte.
-      for (const std::uint16_t s : order) ins[s] = 0;
-      for (const std::uint16_t s : order)
+      for (const auto s : order) parent[s] = kNoToken;
+      for (const auto s : order)
         for (unsigned c = 0; c < nclasses; ++c)
-          if (const std::uint16_t to = dfa.next[s * nclasses + c];
-              classes.test(c) && (ins[to] == 0 || parent[to] != s)) {
-            ins[to] = static_cast<std::uint8_t>(std::min(ins[to] + 1, 2));
-            parent[to] = s;
+          if (const auto to = dfa.next[s * nclasses + c]; classes.test(c)) {
+            auto& p = parent[to];
+            if (p == kNoToken) p = s;
+            else if (p != s) p = 0;
           }
-      for (const std::uint16_t s : order) {
-        if (s == from ? ins[s] != 0 : ins[s] != 1 || ins[parent[s]] == 0) {
-          ins[s] = 0;
-          continue;
-        }
-        ByteSet at;
-        for (unsigned c = 0; c < nclasses; ++c)
-          if (dfa.next[std::size_t{s == from ? 1u : parent[s]} * nclasses + c] == s)
-            at |= classBytes[c];
-        unsigned lo = 0, count = 0;
-        for (unsigned b = 256; b-- > 0;)
-          if (at.has(b) && (s == from || b < limit)) lo = b, ++count;
-        const bool pair = count == 2 && lo >= 'A' && lo <= 'Z' && at.has(lo + ('a' - 'A'));
-        ins[s] = s == from || count == 1 ? 1 : pair ? 2 : 0;
-        letter[s] = static_cast<char>(s != from && pair ? lo | 0x20u : lo);
+      for (const auto s : order) {
+        const auto p = parent[s];
+        length[s] = s == from ? (p == kNoToken) : p && length[p] ? length[p] + 1 : 0;
       }
       std::uint16_t pattern = kNoToken;
       for (const std::uint16_t s : order)
-        if (ins[s] == 0) {
+        if (length[s] == 0) {
           const auto e = ends_of(s);
           if (e[0] >= kWinNone || e[0] != e[1] || e[1] != e[2] ||
               (pattern != kNoToken && e[0] != pattern))
@@ -1578,30 +1587,15 @@ void first_bytes(const Cfg& cfg, const LexDfa& dfa, RunSets& runs, Packed& out) 
       };
       if (pattern == kNoToken || quiet(pattern)) return false;
       for (const std::uint16_t s : order) {
-        if (ins[s] == 0) continue;
+        if (length[s] == 0) continue;
         const auto [atEnd, before, beforeWord] = ends_of(s);
         if (atEnd == pattern && before == pattern && beforeWord == pattern) continue;
-        Spelling spelling;
-        if (atEnd == before && beforeWord == (stops[1].any() ? pattern : before))
-          spelling.terminal = before;
-        if (quiet(spelling.terminal)) return false;
-        // Its bytes, back from `s`: letters in either case or none.
-        bool exact = false;
-        for (std::uint16_t x = s;; x = parent[x]) {
-          spelling.text.push_back(letter[x]);
-          if (x == from) break;
-          const auto c = static_cast<unsigned char>(letter[x]);
-          spelling.folded = spelling.folded || ins[x] == 2;
-          exact = exact || (ins[x] == 1 && (c | 0x20u) >= 'a' && (c | 0x20u) <= 'z');
-        }
-        if (exact && spelling.folded) return false;
-        std::ranges::reverse(spelling.text);
-        path.spelled.push_back(std::move(spelling));
+        const auto terminal = atEnd == before && beforeWord == (stops[1].any() ? pattern : before)
+                                  ? before : kNoToken;
+        if (quiet(terminal)) return false;
+        path.spelled.push_back({length[s], s, terminal});
       }
-      // The texts of a token first: they are read most.
-      std::ranges::sort(path.spelled);
-      std::ranges::stable_partition(path.spelled,
-                                    [](const Spelling& s) { return s.terminal != kNoToken; });
+      if (!path.spelled.empty()) path.first = from;
       path.terminal = pattern;
       path.run = runs.of(bytes);
       return true;
@@ -1634,9 +1628,7 @@ void first_bytes(const Cfg& cfg, const LexDfa& dfa, RunSets& runs, Packed& out) 
     const auto first = [&](std::uint16_t s) -> std::uint32_t {
       if (WordPath path; onward(s).any() &&
                          (word(s, path, 256) || (path = {}, word(s, path, 0x80)))) {
-        const auto [at, added] = paths.try_emplace(
-            {path.terminal, path.run, path.spelled, path.wide},
-            out.wordPaths.size());
+        const auto [at, added] = paths.try_emplace(path, out.wordPaths.size());
         if (added) out.wordPaths.push_back(std::move(path));
         return kFirstWord | at->second;
       } else if (std::vector<std::uint16_t> found; literals(s, found)) {

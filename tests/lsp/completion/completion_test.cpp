@@ -649,16 +649,21 @@ void a_word_terminal_offers_its_property_if_any_spelling_fits() {
   } catch (const cursiv::OperationCancelled&) {}
 }
 
-// A condition that reads the name with the dot before it asks for more
-// letters than the spellings the lexer tells apart from the caret on.
+// A condition that reads the name with the token before it, or with the two
+// tokens before it, asks for more letters than the spellings the lexer tells
+// apart from the caret on.
 void a_condition_may_ask_for_a_longer_spelling() {
   const auto parser = twords::generated::Suite::createParser();
-  const auto whole = parser->parse("dotted:-.abcdefgh");
-  CHECK(whole.accepted && whole.diagnostics.empty());
-  const auto parsed = parser->parse("dotted:-.");
-  std::vector<cursiv::NextFeature> features;
-  parser->nextFeaturesAt(parsed.cst(), 9, 9, features);
-  CHECK(std::ranges::any_of(features, [](const auto& f) { return f.property == "name"; }));
+  for (const std::string_view text : {"dotted:-.", "crossed:x-~"}) {
+    const std::string whole = std::string(text) + "abcdefgh";
+    const auto read = parser->parse(whole);
+    CHECK(read.accepted && read.diagnostics.empty());
+    const auto parsed = parser->parse(text);
+    std::vector<cursiv::NextFeature> features;
+    const auto at = static_cast<cursiv::TextOffset>(text.size());
+    parser->nextFeaturesAt(parsed.cst(), at, at, features);
+    CHECK(std::ranges::any_of(features, [](const auto& f) { return f.property == "name"; }));
+  }
 }
 
 // The trivia before the caret stays trivia once the candidate is written: a
@@ -670,22 +675,50 @@ void a_candidate_keeps_the_trivia_before_it() {
   CHECK(labels_at(*world.lr, "spaced: <|>").empty());
 }
 
+// The fastest of five completions at `at` of `text`.
+std::chrono::steady_clock::duration fastest(const cursiv::Parser& parser, std::string_view text,
+                                            cursiv::TextOffset at) {
+  const auto parsed = parser.parse(text);
+  auto best = std::chrono::steady_clock::duration::max();
+  for (int i = 0; i < 5; ++i) {
+    std::vector<cursiv::NextFeature> features;
+    const auto begin = std::chrono::steady_clock::now();
+    parser.nextFeaturesAt(parsed.cst(), at, at, features);
+    best = std::min(best, std::chrono::steady_clock::now() - begin);
+  }
+  return best;
+}
+
 // The run before the caret reads on into every count after it: the search
 // ends at the first byte instead of spelling each count.
 void a_token_that_reads_on_into_the_spelling_ends_the_search() {
   const auto parser = twords::generated::Suite::createParser();
-  const auto fastest = [&](std::string_view text) {
-    const auto parsed = parser->parse(text);
-    auto best = std::chrono::steady_clock::duration::max();
-    for (int i = 0; i < 5; ++i) {
-      std::vector<cursiv::NextFeature> features;
-      const auto begin = std::chrono::steady_clock::now();
-      parser->nextFeaturesAt(parsed.cst(), 7, 7, features);
-      best = std::min(best, std::chrono::steady_clock::now() - begin);
-    }
-    return best;
-  };
-  CHECK(fastest("chain:y") < 50 * fastest("chain: "));
+  CHECK(fastest(*parser, "chain:y", 7) < 50 * fastest(*parser, "chain: ", 7));
+}
+
+// A count read only at the end of the text ends no spelling that text follows:
+// sixteen times more counts cost about sixteen times more, not their square.
+void a_count_read_at_the_end_is_not_spelled_before_more_text() {
+  const auto parser = twords::generated::Suite::createParser();
+  CHECK(fastest(*parser, "last:  ;", 6) < 64 * fastest(*parser, "few:  ;", 5));
+}
+
+// A literal `a` read only before `;c` turns the name before the caret into it:
+// `c` is refused after the name, and offered where the literal's path reads it.
+void a_guard_before_the_caret_is_read_again_with_the_candidate() {
+  const World world;
+  using Labels = std::vector<std::string>;
+  CHECK(labels_at(*world.lr, "guard:a;<|>") == Labels{"e"});
+  CHECK(labels_at(*world.lr, "guard2:a;:<|>") == (Labels{"c", "e"}));
+  const auto parser = twords::generated::Suite::createParser();
+  constexpr std::string_view middle = "middle:!@~";
+  constexpr std::string_view full = "middle:!@~qqq";
+  const auto parsed = parser->parse(full);
+  CHECK(parsed.accepted && parsed.diagnostics.empty());
+  std::vector<cursiv::NextFeature> features;
+  const auto prefix = parser->parse(middle);
+  parser->nextFeaturesAt(prefix.cst(), middle.size(), middle.size(), features);
+  CHECK(std::ranges::any_of(features, [](const auto& f) { return f.property == "name"; }));
 }
 
 // A member hides an inherited one of its name: the text `target` of `Named`
@@ -764,6 +797,8 @@ void run() {
   a_condition_may_ask_for_a_longer_spelling();
   a_candidate_keeps_the_trivia_before_it();
   a_token_that_reads_on_into_the_spelling_ends_the_search();
+  a_count_read_at_the_end_is_not_spelled_before_more_text();
+  a_guard_before_the_caret_is_read_again_with_the_candidate();
   a_member_hides_an_inherited_one_of_its_name();
   the_replaced_token_is_a_spelling_only_over_its_whole_span();
   a_context_names_the_node_of_its_token();

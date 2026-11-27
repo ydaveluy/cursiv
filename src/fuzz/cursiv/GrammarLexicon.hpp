@@ -16,6 +16,7 @@ namespace cursiv::fuzzer::detail {
 // How a byte of a character set is chosen. `low` and `high` are the set's own
 // boundaries, where a lexer's off-by-one errors are.
 enum class SpellStyle : std::uint8_t { shortest, low, high, random };
+enum class LineRole : std::uint8_t { none, newline, open, block, close };
 
 inline constexpr unsigned kSpellStyles = 4;
 
@@ -47,15 +48,11 @@ struct GrammarLexicon {
   [[nodiscard]] virtual std::string spell(ElementId, SpellStyle,
                                           DecisionSource&,
                                           Veto& after) const = 0;
-  // A spelling the grammar already owns as a literal belongs to that literal,
-  // never to a terminal that happens to reach it.
-  [[nodiscard]] virtual bool reserved(std::string_view) const = 0;
-  // The trivia between `before` and `after` in a trivia region, or in the
-  // grammar for `kNoElement`: the shortest word of its first ignored, then
-  // hidden, rule that neither token would merge with; empty when none.
-  [[nodiscard]] virtual std::string_view separator(ElementId scope,
-                                                   ElementId before,
-                                                   ElementId after) const = 0;
+  [[nodiscard]] virtual LineRole lineRole(ElementId) const = 0;
+  // The first ignored or hidden spelling in scope that neither token absorbs.
+  // In a layout grammar a content line starts at the derivation's indentation.
+  [[nodiscard]] virtual std::string_view separator(
+      ElementId scope, ElementId before, ElementId after, std::string_view previous, char next) const = 0;
 };
 
 }  // namespace cursiv::fuzzer::detail

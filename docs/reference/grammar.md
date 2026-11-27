@@ -138,7 +138,7 @@ escapes and Unicode.
 | `lit<"…", G>` | the literal, only if the guard `G` holds right after it: `lit<"=", !lit<"=">>` |
 | `kw<"…">` | a literal with a word-boundary test when its last character belongs to `word_boundary` |
 | `ikw<"…">` | the same, ignoring letter case: `ikw<"if">` also matches `IF` (see [Case-insensitive languages](../recipes/case-insensitive.md)) |
-| `eol` | CRLF, LF or CR; not the end of input, so write `eol | eof` to accept either |
+| `eol` | one physical line ending (CRLF, LF or CR). Use `eol \| eof` to also accept the end of input |
 | `eof` | the end of input, after any trailing trivia |
 
 `word_boundary` defaults to `w` (ASCII letters, digits and underscore).
@@ -633,8 +633,8 @@ that has a width (or to the start of input): its whitespace and comments.
 | `gap::line` | the gap contains a line ending, outside an `indent_open` bracket |
 | `gap::none` | the gap is empty; even a comment with no spaces around it makes it false |
 
-`e` is a simple text pattern: a class, a literal, `eol` or a repetition of
-them ([other shapes are refused](refusals.md#tokens-and-layout)). For example,
+`e` matches classes, literals and `eol` in sequences, choices and repetitions.
+Literal guards read the text remaining in the gap. For example,
 `kw<"return"> + option(!gap::line + ref<Expression>)` takes no operand from
 the next line, and `ref<Operand> + gap::none + lit<"++">` requires the two to
 touch.
@@ -679,10 +679,8 @@ text**: a tab is never expanded to spaces.
 - The end of input closes every level.
 
 `using indent_newline = NEWLINE;` names the terminal that ends a statement.
-Blank lines, form feeds included, keep the current level. So does a
-comment-only line when `NEWLINE` reads it after a line ending, or when the
-grammar expects no `indent` or `dedent` there and the line's first token ends
-the line, as a comment before the first statement does.
+Blank lines, form feeds included, and lines of trivia only that `NEWLINE` or
+the end of the text ends, such as a comment, keep the current level.
 `indent_open` and `indent_close` name the brackets inside which indentation
 is ignored and line endings are blanks, to `NEWLINE` and to `gap::line`
 alike: a spelling, a choice of spellings, or a terminal. Inside an
@@ -757,6 +755,11 @@ struct COMMENT
     : terminal<lit<"/*"> + many(ref<COMMENT> | (!lit<"/*"> + !lit<"*/"> + any))
                + lit<"*/">> {};
 ```
+
+A terminal read with calls, captures or conditions gets work in proportion to
+the text it reads. One that needs more is not read at that place: for example
+`lit<"a"> + option(ref<T> + lit<"a">)`, whose calls each end at every other
+place of a long run of `a`.
 
 ### Left recursion
 

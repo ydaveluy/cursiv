@@ -76,7 +76,7 @@ std::string shouts_of(const ast::Doc& doc) {
   std::string out;
   for (const auto& shout : shouted->shouts) {
     if (!out.empty()) out += ' ';
-    out += shout.has_value() ? std::string(*shout) : "<none>";
+    out += shout.has_value() && shout->has_value() ? std::string(**shout) : "<none>";
   }
   return out;
 }
@@ -307,24 +307,29 @@ void a_misspelt_token_keeps_its_text_in_a_call(const cursiv::Parser& parser) {
   check(parser, "k litera;", "", "LITERA", true);
 }
 
-// A text nested deep on either side is kept in a few times its length: the
-// larger side grows in place, not copied again at each level.
+// A text nested deep on either side, each level answering what it read or a
+// slice of it, is kept in a few times its length: the larger side grows in
+// place, not copied again at each level.
 void a_nested_text_is_kept_in_a_few_times_its_length(const cursiv::Parser& parser) {
   constexpr unsigned kDepth = 1000;
   // The larger side second, then first; the smaller is kept text, not a view.
-  std::string sources[2], texts[2];
+  // `r` answers each level whole, `s` less its first byte.
+  std::string sources[2], texts[2], sliced;
   texts[1].assign(kDepth, '(');
   for (unsigned i = 0; i < kDepth; ++i) {
     sources[0] += "(( ))";
     texts[0] += "(())";
     sources[1] += "(";
     texts[1] += ")()";
+    sliced += "))";
   }
   for (unsigned i = 0; i < kDepth; ++i) sources[1] += ")( )";
-  for (int side = 0; side < 2; ++side) {
+  for (int run = 0; run < 4; ++run) {
+    const std::string rule = run < 2 ? "r " : "s ";
+    const int side = run % 2;
     tdataparts::seen.clear();
-    const Parsed got = read(parser, "r " + sources[side], false);
-    CHECK(got.clean && got.text == texts[side]);
+    const Parsed got = read(parser, rule + sources[side], false);
+    CHECK(got.clean && got.text == (rule == "r " ? texts[side] : sliced));
     // The bytes the texts read at each level span, each counted once.
     std::vector<std::pair<std::uintptr_t, std::uintptr_t>> spans;
     for (const auto text : tdataparts::seen) {
@@ -338,10 +343,10 @@ void a_nested_text_is_kept_in_a_few_times_its_length(const cursiv::Parser& parse
       if (to > end) kept += to - std::max(from, end);
       end = std::max(end, to);
     }
-    if (kept >= 8 * texts[side].size())
-      std::printf("  nested side %d keeps %zu bytes for a text of %zu\n", side, kept,
-                  texts[side].size());
-    CHECK(kept < 8 * texts[side].size());
+    if (kept >= 8 * sources[side].size())
+      std::printf("  nested %sside %d keeps %zu bytes for a source of %zu\n", rule.c_str(),
+                  side, kept, sources[side].size());
+    CHECK(kept < 8 * sources[side].size());
   }
 }
 

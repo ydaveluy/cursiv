@@ -264,6 +264,7 @@ void exercise(const cursiv::Parser& parser) {
         "recursive:##|(==:==)|##!", "recursive:##|(==:==)/(=:=)|##!",
         "inline:##|(==:==)|==!", "nested:##|(=:(==::==):=)|##!",
         "probe:<==:==>", "echo:aa", "echo:\xE9\xE9", "echo:\xE2\xE2",
+        "doubled:aa", "doubled:aaaaaa",
         "line:ab\nab", "line:\xE9\n\xE9", "line:\xC3\n\xC3",
         "namesakes:abab", "slots:abab",
         R"(raw:#"text"#)", R"(raw:##"a\##"b"##)",
@@ -276,7 +277,7 @@ void exercise(const cursiv::Parser& parser) {
         "local:##|==:=:##!", "shadow:##|==:=##!", "redefined:#=@=#!",
         "helper:##|(==:==)|==!", "recursive:##|(==:==)|==!",
         "inline:##|(==:==)|##!", "nested:##|(=:(==::=):=)|##!", "probe:<==:=>",
-        "echo:ab", "echo:\xE9" "a", "echo:\xE9", "echo:\xE2",
+        "echo:ab", "echo:\xE9" "a", "echo:\xE9", "echo:\xE2", "doubled:aaa",
         "line:\xE9\nx", "line:\xE9", "namesakes:abbb", "slots:abbb",
         R"(raw:##"a\##"b"#)"})
     check(parser, source, false);
@@ -285,6 +286,8 @@ void exercise(const cursiv::Parser& parser) {
   const std::string hashes = "raw:##\"" + std::string(8192, '#') + "\"##";
   check(parser, hashes, true);
   check(parser, "line:" + std::string(1 << 18, 'x'), false);
+  // Marks of each length from one start share what the text repeats of it.
+  check(parser, "doubled:" + std::string(1 << 20, 'a'), true);
 }
 }  // namespace
 
@@ -363,15 +366,22 @@ void exercise(const cursiv::Parser& parser) {
     std::string mark(1 + draw(6), '='), body(draw(24), '=');
     for (std::string* text : {&mark, &body})
       for (char& c : *text) c = draw(2) != 0 ? 'x' : '=';
-    check(parser, "same:", mark + ":" + body + mark, (body + mark).find(mark) == body.size());
+    for (const auto prefix : {"same:", "twice:"})
+      check(parser, prefix, mark + ":" + body + mark, (body + mark).find(mark) == body.size());
   }
   // The body repeats all but the last byte of a 1 MiB mark: each place reads
   // again only the bytes no place before it read.
   const std::string capture(std::size_t{1} << 20, '=');
   const auto begin = std::chrono::steady_clock::now();
-  check(parser, "same:", capture + ":" + capture.substr(1) + "x" + capture);
+  for (const auto prefix : {"same:", "twice:"})
+    check(parser, prefix, capture + ":" + capture.substr(1) + "x" + capture);
   std::printf("  1 MiB mark repeated but its last byte: %.3fs\n",
               std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count());
+  // The places a long mark may repeat at are asked from the furthest back.
+  const std::string half(std::size_t{1} << 19, '=');
+  check(parser, "resumed:", half + "x:" + half + half + "x");
+  check(parser, "resumed:", "=x:=(=)=x");
+  check(parser, "resumed:", "=x:==", false);
   check(parser, "empty:", ":");
   check(parser, "empty:", "#:body#");
   check(parser, "empty:", ":body", false);

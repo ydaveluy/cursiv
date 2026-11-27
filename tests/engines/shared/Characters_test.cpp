@@ -365,6 +365,14 @@ void gaps(const cursiv::Parser& p, std::string_view prefix = {}) {
                   expected ? "accepted" : "refused");
     CHECK(accepted(r) == expected);
   };
+  holds("lines a\r\nb", false);
+  holds("lines a\r\n\nb", true);
+  holds("lines a\r\r\nb", true);
+  holds("unless a01b", false);
+  holds("unless a02b", true);
+  holds("unless a0b", true);
+  holds("ahead a01b", true);
+  holds("ahead a02b", false);
   holds("hn a b", true);
   holds("hn ab", false);
   holds(
@@ -402,6 +410,10 @@ void gaps(const cursiv::Parser& p, std::string_view prefix = {}) {
       true);
   holds("isn a\xC2 b", false);
   holds("hlead a\xC2 b", true);
+  holds(
+      "isn a\xE2\x82"
+      "b",
+      false);
   // A pattern that holds a character is read from that character, whatever a
   // shorter one spells inside it.
   holds(

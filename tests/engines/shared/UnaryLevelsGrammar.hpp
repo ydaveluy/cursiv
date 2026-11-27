@@ -71,7 +71,7 @@ struct Table : Base {
                           prefix<ast::Signed>(lit<"-"> | lit<"!">),
                           left(lit<"*"> | lit<"/">), left(lit<"+"> | lit<"-">),
                           nonassoc(lit<"<"> | lit<">">),
-                          prefix<&ast::Not::word, &ast::Not::body>(kw<"NOT">),
+                          prefix<&ast::Not::word, &ast::Not::body>(option(lit<"~">) + kw<"NOT">),
                           left(kw<"AND">), left(kw<"OR">))> {};
   struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<E>)) + eof> {
   };
@@ -126,7 +126,10 @@ struct Adopted : Base {
   struct Word : rule<create<ast::Binary>(assign<&ast::Binary::op>(ref<ID>))> {};
   struct E : infix<Word, ast::Binary, prefix<&ast::Binary::op, &ast::Binary::right>(lit<"-">)> {};
   struct Left : rule<ref<E> + lit<"<"> + assign<&ast::Binary::left>(ref<Name>)> {};
-  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<Left>)) + eof> {};
+  // Its operand members are no binary level's: one member may name both.
+  struct Same : infix<Word, ast::Binary, prefix<&ast::Binary::op, &ast::Binary::right>(lit<"!">),
+                      &ast::Binary::right, &ast::Binary::op, &ast::Binary::right> {};
+  struct Root : rule<create<ast::Doc>(assign<&ast::Doc::value>(ref<Left> | ref<Same>)) + eof> {};
 };
 
 // Binary operators that read on within a line only: a line that opens with
@@ -154,6 +157,26 @@ struct Factored : Gapped {
   struct SameLine : rule<!gap::line> {};
   template <auto Op>
   struct Lined : rule<ref<SameLine> + Op> {};
+  struct E : infix<Name, ast::Binary,
+                   levels(prefix<ast::Signed>(sign), left(ref<Lined<lit<"*">>>),
+                          left(ref<Lined<sign>>), nonassoc(ref<Lined<lit<"<">>>))> {};
+  struct Root : rule<create<ast::Lines>(many(append<&ast::Lines::items>(ref<E>) + eos)) + eof> {};
+};
+
+// The same operators, read on their operand's line or after a blank: a guard
+// of two alternatives, written in place, then through a rule of its own.
+struct Either : Gapped {
+  template <auto Op>
+  struct Lined : rule<((!gap::line) | gap::has(lit<" ">)) + Op> {};
+  struct E : infix<Name, ast::Binary,
+                   levels(prefix<ast::Signed>(sign), left(ref<Lined<lit<"*">>>),
+                          left(ref<Lined<sign>>), nonassoc(ref<Lined<lit<"<">>>))> {};
+  struct Root : rule<create<ast::Lines>(many(append<&ast::Lines::items>(ref<E>) + eos)) + eof> {};
+};
+struct EitherRule : Gapped {
+  struct OnLine : rule<(!gap::line) | gap::has(lit<" ">)> {};
+  template <auto Op>
+  struct Lined : rule<ref<OnLine> + Op> {};
   struct E : infix<Name, ast::Binary,
                    levels(prefix<ast::Signed>(sign), left(ref<Lined<lit<"*">>>),
                           left(ref<Lined<sign>>), nonassoc(ref<Lined<lit<"<">>>))> {};
@@ -313,9 +336,12 @@ struct Lines : cursiv::GrammarSpec {
             (append<&ast::Block::items>(ref<Name>) + ref<NEWLINE>))> {};
   struct Blocks : rule<create<ast::Lines>(many(append<&ast::Lines::items>(
                       ref<Nested>)))> {};
-  // A line end that reads the `b` after it: a comment's line end is none.
+  // Line ends of their own, one reading the `b` after it: a comment's line end
+  // is neither.
   struct JOINED : terminal<eol + lit<"b">> {};
-  struct Joined : rule<create<ast::Lines>(append<&ast::Lines::items>(ref<Name>) + ref<JOINED> +
+  struct EOL : terminal<eol> {};
+  struct Joined : rule<create<ast::Lines>(append<&ast::Lines::items>(ref<Name>) +
+                                          (ref<JOINED> | (ref<EOL> + lit<".">)) +
                                           append<&ast::Lines::items>(ref<Name>))> {};
   // Two arms an empty rule of each opens: the first reads a line end between
   // its names, which a comment's line end stands for.
@@ -325,6 +351,20 @@ struct Lines : cursiv::GrammarSpec {
   struct Told : rule<create<ast::Lines>(
                     (item(ref<Ends>) + item(ref<Name>) + ref<NEWLINE> + item(ref<Name>)) |
                     (item(ref<Runs>) + item(ref<Name>) + item(ref<Name>)))> {};
+  // Two postfix levels a bracket opens, and one alone: inside them a line
+  // end is a blank, which a test of the gap does not see.
+  struct Indexed : infix<Name, ast::Binary,
+                         levels(postfix<&ast::Unary::operand, &ast::Unary::op>(
+                                    lit<"["> + ref<Base::ID> + !gap::line + lit<"]">),
+                                postfix<&ast::Unary::operand, &ast::Unary::op>(
+                                    lit<"["> + ref<Base::ID> + lit<"!"> + !gap::line + lit<"]">))> {};
+  struct Once : infix<Name, ast::Binary,
+                      postfix<&ast::Unary::operand, &ast::Unary::op>(
+                          lit<"["> + ref<Base::ID> + !gap::line + lit<"]">)> {};
+  struct Indexes : rule<create<ast::Lines>(
+                       NLs + option(some(item(ref<Indexed> | (lit<"once"> + ref<Once>)),
+                                         some(ref<NEWLINE>)) +
+                                    NLs))> {};
 };
 
 // Rules that may read nothing, nested two by two, which only what follows them
@@ -363,13 +403,15 @@ struct Suite : Base {
                      (lit<"adopted:"> + ref<Adopted::Root>) |
                      (lit<"gapped:"> + ref<Gapped::Root>) |
                      (lit<"factored:"> + ref<Factored::Root>) |
+                     (lit<"either:"> + ref<Either::Root>) |
+                     (lit<"eitherrule:"> + ref<EitherRule::Root>) |
                      (lit<"spaced:"> + ref<Spaced::Root>) |
                      (lit<"guarded:"> + ref<GuardedTurns::Root>) |
                      (lit<"lines:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
                                            ref<Lines::Root> + eof)) |
                      (lit<"heads:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
                                            ref<Lines::Heads> + eof)) |
-                     (lit<"logic:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
+                     (lit<"logic:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
                                            ref<Lines::Logic> + eof)) |
                      (lit<"empties:"> + ref<Empties::Root> + eof) |
                      (lit<"few:"> + ref<Empties::Few> + eof) |
@@ -378,7 +420,9 @@ struct Suite : Base {
                      (lit<"glued:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
                                             ref<Lines::Joined> + eof)) |
                      (lit<"told:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
-                                          ref<Lines::Told> + eof))> {};
+                                          ref<Lines::Told> + eof)) |
+                     (lit<"indexed:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
+                                             ref<Lines::Indexes> + eof))> {};
   using entry = Root;
   using hidden = Lines::NOTE;
   using indent_newline = Lines::NEWLINE;

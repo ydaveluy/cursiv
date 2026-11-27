@@ -299,6 +299,12 @@ void exercise(const cursiv::Parser& parser) {
   check(parser, "end:", "qq", false);
   check(parser, "nested:", "((()))");
   check(parser, "nested:", "((())", false);
+  check(parser, "odd:", "aaa");
+  check(parser, "odd:", "aa", false);
+  check(parser, "odd:", std::string(1001, 'a'));
+  // Every call ends at every other place: past its work bound, the terminal
+  // is not read.
+  check(parser, "odd:", std::string(16001, 'a'), false);
   for (auto prefix :
        {"run:", "sequence:", "ambiguous:", "alternative:", "reversed:",
         "seqalt:", "unicode:", "counted:", "variable:"})

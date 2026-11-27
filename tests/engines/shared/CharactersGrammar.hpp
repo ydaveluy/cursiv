@@ -121,7 +121,10 @@ struct Gaps : cursiv::GrammarSpec {
   struct Blank : terminal<some(~cr<"a-z">)> {};
   struct Root
       : rule<create<ast::Doc> +
-             ((lit<"hn"> + lit<"a"> + gap::has(cr<"^é">) + lit<"b">) |
+             ((lit<"lines"> + lit<"a"> + gap::has(eol + eol) + lit<"b">) |
+              (lit<"unless"> + lit<"a"> + gap::has(lit<"0", !lit<"1">>) + lit<"b">) |
+              (lit<"ahead"> + lit<"a"> + gap::is(lit<"0", &lit<"1">> + lit<"1">) + lit<"b">) |
+              (lit<"hn"> + lit<"a"> + gap::has(cr<"^é">) + lit<"b">) |
               (lit<"isn"> + lit<"a"> + gap::is(cr<"^é">) + lit<"b">) |
               (lit<"hbyte"> + lit<"a"> + gap::has(byte) + lit<"b">) |
               (lit<"hlead"> + lit<"a"> + gap::has(cr<"^ é">) + lit<"b">) |

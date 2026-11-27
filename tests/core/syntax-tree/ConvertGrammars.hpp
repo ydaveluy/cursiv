@@ -241,6 +241,9 @@ inline std::vector<std::variant<std::int64_t, std::string>> mixed(
 inline ConstText const_text(std::string_view text) {
   return ConstText(std::string(text.substr(1)));
 }
+inline std::optional<ConstText> maybe_const_text(std::string_view text) {
+  return const_text(text);
+}
 inline std::variant<std::int64_t, std::string> answer(std::string_view text) {
   if (text == "?one") return std::int64_t{1};
   return std::string(text.substr(1));
@@ -436,6 +439,8 @@ struct G : cursiv::GrammarSpec {
   struct SMALL : terminal<as<std::int8_t>(some(d))> {};
   struct CONST_TEXT
       : terminal<as<&chain::const_text>(lit<"="> + some(cr<"a-z">))> {};
+  struct MAYBE_CONST_TEXT
+      : terminal<as<&chain::maybe_const_text>(lit<"|"> + some(cr<"a-z">))> {};
   struct PassedIdent : rule<ref<IDENT>> {};
   struct ANSWER : terminal<as<&chain::answer>(lit<"?"> + some(cr<"a-z">))> {};
   struct MAYBE : terminal<as<&chain::maybe>(lit<"*"> + some(cr<"a-z">))> {};
@@ -455,7 +460,8 @@ struct G : cursiv::GrammarSpec {
             option(assign<&chain::Doc::only>(ref<ONLY>)) +
             option(kw<"small"> + assign<&chain::Doc::wide>(ref<SMALL>)) +
             option(kw<"constant"> +
-                   assign<&chain::Doc::constText>(ref<CONST_TEXT>) +
+                   (assign<&chain::Doc::constText>(ref<CONST_TEXT>) |
+                    assign<&chain::Doc::constText>(ref<MAYBE_CONST_TEXT>)) +
                    many(append<&chain::Doc::constTexts>(ref<CONST_TEXT>))) +
             option(kw<"pass"> + assign<&chain::Doc::passed>(ref<PassedIdent>)) +
             option(kw<"pick"> + assign<&chain::Doc::pick>(ref<ONLY>) +

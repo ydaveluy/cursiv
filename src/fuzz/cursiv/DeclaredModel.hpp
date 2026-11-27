@@ -130,6 +130,10 @@ template <std::size_t Mn, std::size_t Mx, class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::Repeat<Mn, Mx, E>> = ElementKind::repetition;
 template <>
 inline constexpr ElementKind shape_kind<cursiv::detail::Eof> = ElementKind::not_predicate;
+template <>
+inline constexpr ElementKind shape_kind<cursiv::detail::Indent> = ElementKind::layout;
+template <>
+inline constexpr ElementKind shape_kind<cursiv::detail::Dedent> = ElementKind::layout;
 template <class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::Not<E>> = ElementKind::not_predicate;
 template <class E>
@@ -142,12 +146,14 @@ template <class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::GapHas<E>> = ElementKind::and_predicate;
 template <class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::GapIs<E>> = ElementKind::and_predicate;
+template <>
+inline constexpr ElementKind shape_kind<cursiv::detail::GapIs<cursiv::detail::Epsilon>> = ElementKind::empty_gap;
 template <auto P, class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::Assign<P, E>> = ElementKind::assignment;
 template <auto P, class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::Append<P, E>> = ElementKind::assignment;
 template <auto P, class E>
-inline constexpr ElementKind shape_kind<cursiv::detail::Flag<P, E>> = ElementKind::assignment;
+inline constexpr ElementKind shape_kind<cursiv::detail::Flag<P, E>> = ElementKind::flag;
 template <class T, class E>
 inline constexpr ElementKind shape_kind<cursiv::detail::Create<T, E>> = ElementKind::create;
 template <class T, auto P, class E>
@@ -237,9 +243,12 @@ template <class E>
 consteval ElementKind kind_of() {
   using T = std::remove_cvref_t<E>;
   if constexpr (requires { typename T::kind; }) {
-    if constexpr (kIsTerminalRule<T>)
+    if constexpr (kIsTerminalRule<T>) {
+      using Body = cursiv::detail::declared_body_t<T>;
+      if constexpr (std::is_same_v<Body, cursiv::detail::Indent> ||
+                    std::is_same_v<Body, cursiv::detail::Dedent>) return ElementKind::layout;
       return ElementKind::terminal_rule;
-    else if constexpr (cursiv::detail::is_infix_rule<T>)
+    } else if constexpr (cursiv::detail::is_infix_rule<T>)
       return ElementKind::infix_rule;
     else if constexpr (cursiv::detail::is_data_rule<T>)
       return ElementKind::data_type_rule;

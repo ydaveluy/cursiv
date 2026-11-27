@@ -44,23 +44,21 @@ inline constexpr std::uint32_t kFirstWord = 2u << 30;
 inline constexpr std::uint32_t kFirstIndex = kFirstLiterals - 1;
 inline constexpr std::uint16_t kNoMode = 0xFFFF;
 
-// A text a `WordPath` reads apart: its bytes, letters in either case where
-// `folded`, and its token, `kNoToken` where the automaton reads it.
+// A run of this length reads a different terminal if it ends in this state.
+// kNoToken leaves the decision to the full lexer.
 struct Spelling {
-  std::string text;
-  bool folded = false;
-  std::uint16_t terminal = kNoToken;
+  std::uint16_t length, state, terminal;
   auto operator<=>(const Spelling&) const = default;
 };
 
-// A token read by `run`, with `wide` leaving non-ASCII continuations to the
-// automaton: `terminal`, or what a text of `spelled` reads, where no word
-// goes on past it if the run can stop before a byte of a word.
+// The run after a first byte, with the states that change its usual terminal.
 struct WordPath {
   std::uint16_t terminal = 0;
+  std::uint16_t first = 0;
   std::uint32_t run = 0;
   bool wide = false;
   std::vector<Spelling> spelled;
+  auto operator<=>(const WordPath&) const = default;
 };
 
 struct PackedAction {
@@ -175,8 +173,12 @@ struct Packed {
   std::vector<std::uint16_t> lexReachOf;
   std::vector<std::uint16_t> lexTieEnds;
   std::vector<std::uint16_t> followOf;
-  // The set of the trivia whose line ends end a line.
-  std::uint16_t newlineIn = 0;
+  // The sets of the line's terminal and its copies, and of the trivia whose
+  // line ends end a line.
+  std::uint16_t lines = 0, newlineIn = 0;
+  // Per byte, 1 where trivia or the line's terminal may read it first past a
+  // line's blanks; empty where the language reads no indentation.
+  std::vector<std::uint8_t> lineLeads;
   std::vector<std::uint16_t> mayCloseOf;
   std::vector<bool> lexTrivia;  // A trivia can end at or beyond this DFA state.
   // What reads the terminals the automaton reads the first bytes of only,
@@ -221,13 +223,14 @@ struct Packed {
   // none of them as a token: the bytes of `skipped` are then dropped unread.
   std::vector<bool> modeSkips;
   // Per state its kernel, each written once, and per nonterminal its left
-  // corners, as the fewest tokens that complete a stack read them (see
-  // `Tables::kernels`).
+  // corners and the fewest tokens it reads: what the fewest tokens that
+  // complete a stack are read from (see `Tables::kernels`).
   std::vector<std::uint16_t> kernelOf;
   std::vector<std::uint32_t> kernelAt;
   std::vector<std::uint64_t> kernels;
   std::vector<std::uint32_t> cornerAt;
   std::vector<std::uint32_t> corners;
+  std::vector<std::uint16_t> yields;
   // Per nonterminal, whether it can read nothing.
   std::vector<bool> nullable;
   // Per mode, the mode a fault of its states is read in: the terminals

@@ -59,9 +59,9 @@ function(cursiv_rgram seed)
   target_link_libraries(${id}_check PRIVATE rgramOracle cursiv::engine)
 endfunction()
 
-# One accepted seed per family. 107 and 242 close a region on a rule;
-# in 107, 169 and 189 a list's continuation shifts a token the state expects.
-set(_rgram_fixed 107 169 189 242 296 164 126 223)
+# One accepted seed per family, plus a scoped end behind nullable rules (6946)
+# and a guarded left recursion whose condition starts with a reduction (9176).
+set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176)
 foreach(seed IN LISTS _rgram_fixed)
   cursiv_rgram(${seed})
   add_test(NAME rgram_${seed} COMMAND rgram${seed}_check)
@@ -70,7 +70,7 @@ endforeach()
 
 # The fixed seeds' generators share one compilation, as the other test
 # generators do; the long run stays out of these batches.
-foreach(index RANGE 0 1)
+foreach(index RANGE 0 2)
   math(EXPR first "${index} * 4")
   list(SUBLIST _rgram_fixed ${first} 4 batch)
   list(TRANSFORM batch PREPEND rgram)

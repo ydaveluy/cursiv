@@ -3,15 +3,17 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "cursiv/Check.hpp"
+#include "cursiv/engine/generator/Generate.hpp"
 #include "cursiv/engine/grammar/Lower.hpp"
 #include "cursiv/engine/grammar/Optimize.hpp"
 #include "cursiv/engine/grammar/View.hpp"
 #include "cursiv/engine/grammar/WritesOnce.hpp"
-#include "cursiv/engine/parser/Pack.hpp"
+#include "cursiv/engine/parser/EmitDrive.hpp"
 
 namespace {
 
@@ -188,6 +190,33 @@ void a_chain_of_terminal_calls_is_followed_once() {
   CHECK(spent < std::chrono::seconds(1));
 }
 
+// Each word terminal calls the one below through two aliases: the words of a
+// choice that several calls reach are listed once, not once per path.
+struct DoubledWords : cursiv::GrammarSpec {
+  struct Base : terminal<lit<"a"> | lit<"b">> {};
+  template <int K>
+  struct Word;
+  template <int K>
+  using Below = std::conditional_t<K == 1, Base, Word<K - 1>>;
+  template <int K>
+  struct Left : terminal<ref<Below<K>>> {};
+  template <int K>
+  struct Right : terminal<ref<Below<K>>> {};
+  template <int K>
+  struct Word : terminal<ref<Left<K>> | ref<Right<K>>> {};
+  struct Root : rule<create<Postfix>(ref<Word<16>>)> {};
+  using entry = Root;
+};
+
+void shared_words_are_listed_once() {
+  auto image = grammar_image<View<DoubledWords>>();
+  const auto cfg = lower(image, kLowerDesc<DoubledWords>);
+  std::size_t most = 0;
+  for (const Terminal& t : cfg.terminals) most = std::max(most, t.words.size());
+  if (most != 2) std::printf("a terminal of the words a and b lists %zu words\n", most);
+  CHECK(most == 2);
+}
+
 struct NamedClosers : cursiv::GrammarSpec {
   struct Close : terminal<lit<"*/">> {};
   struct Again : terminal<lit<"*/"> | ref<Again>> {};
@@ -291,10 +320,7 @@ struct SectionHost : cursiv::GrammarSpec {
   using entry = Root;
 };
 
-template <class G>
-Packed plain_tables() {
-  auto image = grammar_image<View<G>>();
-  auto cfg = lower(image, kLowerDesc<G>);
+Packed plain_tables(GrammarImage& image, Cfg& cfg) {
   optimize(cfg);
   LexAutomatonBuilder lexer(image);
   for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t) lexer.add(t, cfg.terminals[t]);
@@ -302,6 +328,59 @@ Packed plain_tables() {
   const auto rivals = lex_rivals(image, cfg, dfa);
   const auto lr = build_lr1(cfg, rivals.takes, Bits(cfg.terminals.size()));
   return pack(image, cfg, std::move(dfa), rivals.takes, lr);
+}
+
+template <class G>
+Packed plain_tables() {
+  auto image = grammar_image<View<G>>();
+  auto cfg = lower(image, kLowerDesc<G>);
+  return plain_tables(image, cfg);
+}
+
+template <bool Shared>
+struct ScopedShift : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Root : rule<tight(lit<"a"> + lit<"b">) |
+                     (lit<"a"> + tight(lit<Shared ? "b" : "c"> + lit<"d">)) |
+                     skip(ignore<WS, WS>, hide<>, lit<"x"> + lit<"y">) |
+                     (lit<"x"> + lit<"y"> + lit<"z">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+void a_shared_shift_requires_one_trivia_setting() {
+  (void)plain_tables<ScopedShift<false>>();
+  try {
+    (void)plain_tables<ScopedShift<true>>();
+    CHECK(false);
+  } catch (const Refused& error) {
+    CHECK(std::string_view(error.what()).find("the trivia before 'b'") != std::string_view::npos);
+  }
+}
+
+struct WordPrefixes : cursiv::GrammarSpec {
+  struct Blank : terminal<some(cr<"a-z">)> {};
+  using ignored = Blank;
+  struct Word : terminal<lit<"a"> + option(lit<"a">)> {};
+  struct Root : rule<ref<Word>> {};
+  using entry = Root;
+};
+
+std::size_t prefix_lexer_size(unsigned count) {
+  auto image = grammar_image<View<WordPrefixes>>();
+  auto cfg = lower(image, kLowerDesc<WordPrefixes>);
+  auto& word = *std::ranges::find(cfg.terminals, "Word", &Terminal::name);
+  const auto start = image.nodes[word.body].first;
+  std::vector<ImageId> parts(count, image.children[start + 1]);
+  parts.front() = image.children[start];
+  word.body = image.group(ImageKind::seq, parts);
+  const auto tables = plain_tables(image, cfg);
+  std::size_t size = 0;
+  emit_drive(cfg, tables, {}, [&](std::string_view name, std::initializer_list<std::string_view> text) {
+    if (name == "ParserStates.hpp")
+      for (const auto part : text) size += part.size();
+  });
+  return size;
 }
 
 struct Cycles : cursiv::GrammarSpec {
@@ -537,6 +616,10 @@ bool refuses_too_many_actions(std::size_t rows) {
 }  // namespace
 
 int main() {
+  a_shared_shift_requires_one_trivia_setting();
+  const auto small = prefix_lexer_size(64), medium = prefix_lexer_size(128);
+  // Doubling the prefixes adds twice the code, allowing for wider state numbers.
+  CHECK(prefix_lexer_size(256) <= medium + 5 * (medium - small) / 2);
   long_unit_chains_share_blocks_and_read_in_order();
   const auto chains = plain_tables<UnitChains>();
   CHECK(chains.hops.size() == 7);  // Empty chain, two outer rules, four base alternatives.
@@ -552,6 +635,7 @@ int main() {
   overlapping_runs_keep_their_own_matcher_entry(true);
   an_unbounded_condition_is_read_by_one_matcher_thread();
   a_chain_of_terminal_calls_is_followed_once();
+  shared_words_are_listed_once();
   using N = NamedClosers;
   // A closer behind a doc or a terminal's name is read as its literal is.
   CHECK(closing_table<N::lit<"*/">.doc<"Ends the comment.">()>() ==

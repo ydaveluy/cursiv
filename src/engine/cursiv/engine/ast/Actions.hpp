@@ -194,7 +194,7 @@ CURSIV_ALWAYS_INLINE inline void read_value(AstBuilder& b, NodeId at, Sink&& sin
       return detail::is_data_rule<R>;
   }();
   // A member of views takes text as it stands: the source's, or what the tree keeps.
-  constexpr bool view = std::is_same_v<typename detail::strip_storage<H>::type, std::string_view>;
+  constexpr bool view = std::is_same_v<typename detail::strip_storage<H>::bare, std::string_view>;
   if constexpr (!data) {
     const std::string_view text = b.cst.text(at);
     // A token a repair invented gives no value.
@@ -355,7 +355,7 @@ struct RowWrite<Row<K, T, detail::field_tag<P>, N, Src>> {
       using H = typename written_as<typename F::member, X, Src>::type;
       static_assert(!std::is_void_v<H>, "no alternative of the member takes the value written");
       read_value<Src, H>(b, b.payload(item.record), [&](auto&& value) {
-        static_assert(!std::is_same_v<H, std::string_view> ||
+        static_assert(!std::is_same_v<typename detail::strip_storage<H>::bare, std::string_view> ||
                       !std::is_same_v<std::remove_cvref_t<decltype(value)>, std::string>,
                       "a converter returning std::string needs an owning AST property");
         detail::place<H>(member, std::forward<decltype(value)>(value));

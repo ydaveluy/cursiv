@@ -59,6 +59,7 @@ struct Stated : cursiv::Extends<cursiv::AstNode> {
   string_view name;
   vector<Stated*> body;
 };
+struct SecondPrefix : cursiv::Extends<Stated> {};
 struct Expression : cursiv::Extends<cursiv::AstNode> {};
 struct Name : cursiv::Extends<Expression> {
   string_view name;
@@ -297,6 +298,17 @@ struct LiteralConditionRank : cursiv::GrammarSpec {
   struct Root : rule<create<ast::Won>(
                     (assign<&ast::Won::name>(ref<NAME>) + lit<";">) |
                     (assign<&ast::Won::token>(ref<COND>) + lit<";">))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
+// A literal followed by the end of input ranks as a literal, as with `&eof`.
+struct EndRank : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct NAME : terminal<some(cr<"a-zA-Z">)> {};
+  struct END : terminal<lit<"if"> + eof> {};
+  struct Root : rule<create<ast::Won>(assign<&ast::Won::name>(ref<NAME>) |
+                                      assign<&ast::Won::token>(ref<END>))> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -580,6 +592,9 @@ struct LongString : cursiv::GrammarSpec {
 
 struct Split : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
+  struct EmptyLine : rule<create<ast::Stated>(gap::line)> {};
+  struct Line : rule<create<ast::Stated>(lit<"a"> + append<&ast::Stated::body>(ref<EmptyLine>) +
+                                         many(lit<"b">) + gap::line + lit<"b">)> {};
   struct Root
       : rule<create<ast::Doc>((lit<"a"> + lit<"b">) | (lit<"ab"> + lit<"c">))> {
   };
@@ -921,6 +936,25 @@ struct Levels : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+// A left recursion behind a many: a text opens before its first token as many
+// levels as the `d` that close them.
+struct Behind : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Leaf : rule<create<ast::Stated>(assign<&ast::Stated::name>(lit<"c">))> {};
+  struct Root : rule<create<ast::Stated>(
+                    (many(append<&ast::Stated::body>(ref<Leaf>)) +
+                     append<&ast::Stated::body>(ref<Root>) + lit<"d">) |
+                    assign<&ast::Stated::name>(lit<"a">))> {};
+  struct Prefix : rule<create<ast::Stated>((&lit<"a">) | assign<&ast::Stated::name>(lit<"c">))> {};
+  struct Next : rule<create<ast::SecondPrefix>(&lit<"a">)> {};
+  struct Guarded : rule<create<ast::Stated>(
+      (append<&ast::Stated::body>(ref<Prefix>) + append<&ast::Stated::body>(ref<Next>) +
+       append<&ast::Stated::body>(ref<Guarded>) + lit<"d">) |
+      assign<&ast::Stated::name>(lit<"a"> | lit<"b">))> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // Each suffix of a chain is the operand's or the loop's, to the end of the
 // text.
 struct Chain : cursiv::GrammarSpec {
@@ -1010,8 +1044,8 @@ struct Postfixed : cursiv::GrammarSpec {
 struct LongRun : cursiv::GrammarSpec {
   struct WS : terminal<some(s)> {};
   struct Root : rule<create<ast::Doc>(
-                    (repeat<300>(lit<"x">) + lit<";"> + many(lit<"n">)) |
-                    (repeat<270>(lit<"x">) + lit<"k"> + lit<";"> + lit<"m"> + repeat<40>(lit<"n">)))> {};
+                    (repeat<300>(lit<"x">) + lit<";"> + repeat<600>(lit<"n">)) |
+                    (repeat<270>(lit<"x">) + lit<"k"> + lit<";"> + lit<"m"> + repeat<630>(lit<"n">)))> {};
   using entry = Root;
   using ignored = WS;
 };
@@ -1081,6 +1115,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"literalsrank:"> + ref<LiteralsRank::Root>) |
              (lit<"literalsrankrefuses:"> + ref<LiteralsRankRefuses::Root>) |
              (lit<"literalconditionrank:"> + ref<LiteralConditionRank::Root>) |
+             (lit<"endrank:"> + ref<EndRank::Root>) |
              (lit<"mixedrank:"> + ref<MixedRank::Root>) |
              (lit<"conditionedrank:"> + ref<ConditionedRank::Root>) |
              (lit<"conditionedrankswapped:"> +
@@ -1108,6 +1143,7 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"attachedcallcalled:"> + ref<AttachedCallCalled::Root>) |
              (lit<"closers:"> + ref<Closers::Root>) |
              (lit<"longstring:"> + ref<LongString::Root>) |
+             (lit<"splitline:"> + ref<Split::Line>) |
              (lit<"split:"> + ref<Split::Root>) |
              (lit<"callerlonger:"> + ref<CallerLonger::Root>) |
              (lit<"callermany:"> + ref<CallerMany::Root>) |
@@ -1142,6 +1178,8 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"convergedarms:"> + ref<ConvergedArms::Root>) |
              (lit<"ambiguouslist:"> + ref<AmbiguousList::Root>) |
              (lit<"levels:"> + ref<Levels::Root>) |
+             (lit<"behind:"> + ref<Behind::Root>) |
+             (lit<"blankprefix:"> + ref<Behind::Guarded>) |
              (lit<"chain:"> + ref<Chain::Root>) |
              (lit<"unboundedname:"> + ref<UnboundedName::Root>) |
              (lit<"keywordtrivia:"> + skip(ignore<KeywordTrivia::WS>,

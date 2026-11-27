@@ -2253,6 +2253,11 @@ void a_value_never_assigned_fills_a_list() {
   if (doc == nullptr) return;
   CHECK(doc->constText.has_value() && doc->constText->text == "first");
   CHECK(doc->constTexts.size() == 2 && doc->constTexts[1].text == "third");
+  // An optional a converter answers whole builds its value in place too.
+  const auto whole = engine().parse(R"(chain "a" "b" constant |whole)");
+  const auto* answered = whole.valueAs<chain::Doc>();
+  CHECK(whole && answered != nullptr && answered->constText.has_value() &&
+        answered->constText->text == "whole");
 }
 
 // A rule that passes on a value with no empty state.

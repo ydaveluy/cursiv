@@ -18,7 +18,7 @@ namespace {
 
 // An item is a production and a dot, numbered in one sequence.
 struct Items {
-  explicit Items(const Cfg& cfg) : cfg(cfg), of(cfg.productionsOf) {
+  explicit Items(const Cfg& cfg, std::vector<bool> blanks = {}) : cfg(cfg), of(cfg.productionsOf) {
     nterms = cfg.terminals.size();
     const std::size_t nnts = cfg.nonterminals;
     base.reserve(cfg.productions.size());
@@ -33,7 +33,7 @@ struct Items {
     // What each nonterminal may begin with, whether it may read nothing, and
     // whether it then lets any token follow: a production that reads nothing
     // and holds only before tokens it names begins with them instead.
-    nullable = cfg.nullable();
+    nullable = blanks.empty() ? cfg.nullable() : std::move(blanks);
     open.assign(nnts, false);
     first.assign(nnts, Bits(nterms));
     // A production is read again only when a nonterminal it may begin with
@@ -823,11 +823,10 @@ LrState facts(const Items& it, Closure& closure, std::span<const Position> kerne
           through.set(t);
         if (t != kEndOfInput) state.named.push_back(t);
       }
-      // Where a token that may stand for trivia of the test comes, the test
-      // reads the text again.
-      if (!test.unless)
-        for (const std::uint16_t s : test.shadows)
-          if (la.test(s)) through.set(s);
+      // A shadow may satisfy a positive test. A held end can also fail a
+      // negative test's spelling check when another scope skipped its gap.
+      for (const std::uint16_t s : test.shadows)
+        if ((!test.unless || s == kEndOfInput) && la.test(s)) through.set(s);
       on.merge(through);
     }
     if (on.any()) state.reduces.emplace_back(it.prod[item], std::move(on));
@@ -978,14 +977,16 @@ std::vector<std::uint32_t> join_states(const Items& it, const std::vector<LrStat
         }
       });
     }
-    // Fill the earliest compatible group, 64 groups at a time. Once a row
-    // disagrees with a block it can never join it: groups only gain decisions.
-    std::vector<std::uint32_t> pending(statesOf.size());
-    std::iota(pending.begin(), pending.end(), 0u);
-    while (!pending.empty()) {
-      std::vector<std::uint64_t> fixed(it.nterms), same(choices.size());
-      std::size_t left = 0;
+    // Fill the earliest compatible groups, 64 at a time. Rejected rows can
+    // never join this block as its groups only gain decisions.
+    std::vector<std::uint64_t> fixed(it.nterms), same(choices.size());
+    std::vector<std::uint32_t> placed;
+    const auto block = [&](std::vector<std::uint32_t>& pending) {
+      for (const auto i : placed)
+        for (const auto [cell, choice] : rows[i]) fixed[cell] = same[choice] = 0;
+      placed.clear();
       unsigned used = 0;
+      std::size_t left = 0;
       for (const auto i : pending) {
         std::uint64_t fits = ~std::uint64_t{0};
         for (const auto [cell, choice] : rows[i]) {
@@ -1000,6 +1001,7 @@ std::vector<std::uint32_t> join_states(const Items& it, const std::vector<LrStat
         partOf[statesOf[i]] = parts + group;
         used = std::max(used, group + 1);
         const auto bit = std::uint64_t{1} << group;
+        placed.push_back(i);
         for (const auto [cell, choice] : rows[i]) {
           fixed[cell] |= bit;
           same[choice] |= bit;
@@ -1007,7 +1009,30 @@ std::vector<std::uint32_t> join_states(const Items& it, const std::vector<LrStat
       }
       pending.resize(left);
       parts += used;
+    };
+    std::vector<std::uint32_t> pending(statesOf.size());
+    std::iota(pending.begin(), pending.end(), 0u);
+    block(pending);
+    if (pending.empty()) continue;
+    // Decisions made by every remaining row partition the search: no group
+    // can join across keys. Free cells still use first-compatible order.
+    std::vector<std::size_t> count(it.nterms);
+    for (const auto i : pending)
+      for (const auto [cell, choice] : rows[i]) ++count[cell];
+    std::unordered_map<std::vector<std::uint64_t>, std::vector<std::uint32_t>, WordsHash> byKey;
+    std::vector<std::uint64_t> key;
+    for (const auto i : pending) {
+      key.clear();
+      auto& row = rows[i];
+      auto keep = row.begin();
+      for (const auto d : row)
+        if (count[d.first] == pending.size()) key.push_back(d.second);
+        else *keep++ = d;
+      row.erase(keep, row.end());
+      byKey[key].push_back(i);
     }
+    for (auto& [decisions, batch] : byKey)
+      while (!batch.empty()) block(batch);
   }
   // Every transition into an LR core has the symbol before its dot.
   parts = refine_partition(partOf, parts, 1, [&](auto add) {
@@ -1026,13 +1051,17 @@ std::vector<std::uint32_t> join_states(const Items& it, const std::vector<LrStat
 
 }  // namespace
 
-std::vector<std::uint32_t> left_components(const Cfg& cfg, std::span<const std::uint32_t> prefix) {
+std::vector<std::uint32_t> left_components(const Cfg& cfg, std::span<const std::uint32_t> prefix,
+                                           const std::vector<bool>& nullable) {
   std::vector<std::uint32_t> starts{0}, edges;
   for (const auto& rules : cfg.productionsOf) {
     for (const auto p : rules) {
       const auto& rhs = cfg.productions[p].rhs;
-      const auto at = prefix.empty() ? 0u : prefix[p];
-      if (at < rhs.size() && !is_terminal(rhs[at])) edges.push_back(index_of(rhs[at]));
+      for (auto at = prefix.empty() ? 0u : prefix[p]; at < rhs.size() && !is_terminal(rhs[at]); ++at) {
+        const auto child = index_of(rhs[at]);
+        edges.push_back(child);
+        if (nullable.empty() || !nullable[child]) break;
+      }
     }
     starts.push_back(static_cast<std::uint32_t>(edges.size()));
   }
@@ -1044,8 +1073,20 @@ std::vector<std::uint32_t> left_components(const Cfg& cfg, std::span<const std::
 }
 
 void split_leads(Cfg& cfg) {
-  if (cfg.regions.size() < 2) return;
-  const Items it(cfg);
+  auto blanks = cfg.nullable();
+  const auto group = left_components(cfg, {}, blanks);
+  std::vector<bool> hidden(cfg.productions.size());
+  bool recursive = false;
+  for (std::size_t q = 0; q < hidden.size(); ++q) {
+    const Production& p = cfg.productions[q];
+    for (std::size_t at = 0; at < p.rhs.size() && !is_terminal(p.rhs[at]); ++at) {
+      const auto nt = index_of(p.rhs[at]);
+      if (at != 0 && group[nt] == group[p.lhs]) hidden[q] = recursive = true;
+      if (!blanks[nt]) break;
+    }
+  }
+  if (!recursive && cfg.regions.size() < 2) return;
+  const Items it(cfg, std::move(blanks));
   const std::vector<Production> original = cfg.productions;
   const std::vector<std::vector<std::uint32_t>> of = cfg.productionsOf;
   // The productions an infix table names stay as they are.
@@ -1130,7 +1171,7 @@ void split_leads(Cfg& cfg) {
   for (std::uint32_t q = 0; q < original.size(); ++q) {
     const Production& p = original[q];
     if (fixed[p.lhs] || p.rhs.size() < (it.ends(q) ? 1u : 2u) || !nullable(p.rhs[0]) ||
-        (it.begins[p.lhs] & ~(std::uint64_t{1} << p.region)) == 0)
+        (!hidden[q] && (it.begins[p.lhs] & ~(std::uint64_t{1} << p.region)) == 0))
       continue;
     bool first = true;
     ways(p, true, [&](std::vector<Symbol>&& rhs, std::size_t folded) {
@@ -1169,11 +1210,20 @@ void split_leads(Cfg& cfg) {
 }
 
 void shadow_tests(Cfg& cfg, const std::vector<RivalRow>& reads) {
-  Bits shadow(cfg.terminals.size());
+  Bits shadow(cfg.terminals.size()), trivia(cfg.terminals.size());
+  for (const auto& scope : cfg.regions)
+    for (const auto* list : {&scope.ignored, &scope.hidden})
+      for (auto t : *list) trivia.set(t);
+  std::vector<bool> narrower;
   for (Region& scope : cfg.regions) {
     shadow.clear();
+    Bits foreign = trivia;
     for (const auto* list : {&scope.ignored, &scope.hidden})
-      for (const std::uint16_t t : *list) shadow.merge(reads[t]);
+      for (const std::uint16_t t : *list) {
+        shadow.merge(reads[t]);
+        foreign.reset(t);
+      }
+    narrower.push_back(foreign.any());
     shadow.each([&](std::size_t s) {
       if (cfg.terminals[s].trivia == Trivia::none)
         scope.shadows.push_back(static_cast<std::uint16_t>(s));
@@ -1187,6 +1237,9 @@ void shadow_tests(Cfg& cfg, const std::vector<RivalRow>& reads) {
       for (const std::uint16_t t : test.ahead)
         if (t != kEndOfInput && !test.elected) shadow.merge(reads[t]);
       for (const std::uint16_t t : test.ahead) shadow.reset(t);
+      // A held end may stand past trivia this scope would have stopped at.
+      if (narrower[p.region] && std::ranges::find(test.ahead, kEndOfInput) != test.ahead.end())
+        shadow.set(kEndOfInput);
       shadow.each([&](std::size_t s) {
         if (cfg.terminals[s].trivia == Trivia::none)
           test.shadows.push_back(static_cast<std::uint16_t>(s));
@@ -1206,15 +1259,16 @@ static void guard_turns(Cfg& cfg) {
   // A choice or sequence of conditions still reads no input. A transparent
   // unary rule uses the same marker as its child.
   std::vector<Symbol> guard(cfg.nonterminals, kNone);
+  std::vector<bool> writes(cfg.nonterminals), tested(cfg.nonterminals);
   std::vector<std::uint32_t> pending(cfg.nonterminals);
   std::vector<std::vector<std::uint32_t>> parents(cfg.nonterminals);
   std::vector<std::uint32_t> work;
   for (std::uint32_t nt = 0; nt < cfg.nonterminals; ++nt) {
     for (const auto p : cfg.productionsOf[nt]) {
       const auto& q = cfg.productions[p];
-      if (atomic_test(q)) continue;
-      if (q.rhs.empty() || q.entry != kNone || q.start || q.implied || q.tested() ||
-          std::ranges::any_of(q.rhs, is_terminal)) {
+      writes[nt] = writes[nt] || q.entry != kNone;
+      tested[nt] = tested[nt] || q.tested();
+      if (q.start || q.implied || std::ranges::any_of(q.rhs, is_terminal)) {
         pending[nt] = kNone;
         break;
       }
@@ -1231,11 +1285,15 @@ static void guard_turns(Cfg& cfg) {
     guard[nt] = nonterminal(nt);
     const auto& ways = cfg.productionsOf[nt];
     if (ways.size() == 1) {
-      const auto& rhs = cfg.productions[ways.front()].rhs;
-      if (rhs.size() == 1) guard[nt] = guard[index_of(rhs.front())];
+      const auto& q = cfg.productions[ways.front()];
+      if (q.rhs.size() == 1 && q.entry == kNone && !q.tested() && q.takes.empty())
+        guard[nt] = guard[index_of(q.rhs.front())];
     }
-    for (const auto parent : parents[nt])
+    for (const auto parent : parents[nt]) {
+      tested[parent] = tested[parent] || tested[nt];
+      writes[parent] = writes[parent] || writes[nt];
       if (pending[parent] != kNone && --pending[parent] == 0) work.push_back(parent);
+    }
   }
   bool needed = false;
   for (std::uint32_t p = 0; p < n; ++p) {
@@ -1246,7 +1304,15 @@ static void guard_turns(Cfg& cfg) {
   }
   if (!needed) return;
   const auto group = left_components(cfg, prefix);
-  using Mark = std::pair<Symbol, std::uint16_t>;
+  struct Mark {
+    Symbol symbol;
+    std::uint16_t scope;
+    std::uint32_t take;
+    auto operator<=>(const Mark&) const = default;
+  };
+  const auto mark_at = [&](const Production& q, std::size_t i) {
+    return Mark{guard[index_of(q.rhs[i])], q.scope_at(i), q.takes.empty() ? kNone : q.takes[i]};
+  };
   std::map<std::uint32_t, std::map<Mark, std::uint32_t>> marks;
   std::vector<bool> turn(n);
   for (std::uint32_t p = 0; p < n; ++p) {
@@ -1254,9 +1320,11 @@ static void guard_turns(Cfg& cfg) {
     const auto at = prefix[p];
     if (at == q.rhs.size() || is_terminal(q.rhs[at]) || group[q.lhs] != group[index_of(q.rhs[at])]) continue;
     turn[p] = true;
-    for (std::uint32_t i = 0; i < at; ++i) marks[group[q.lhs]].try_emplace({guard[index_of(q.rhs[i])], q.scope_at(i)}, 0);
+    for (std::uint32_t i = 0; i < at; ++i) {
+      const auto nt = index_of(q.rhs[i]);
+      if (tested[nt] || writes[nt]) marks[group[q.lhs]].try_emplace(mark_at(q, i), 0);
+    }
   }
-  if (marks.empty()) return;
   std::map<Mark, std::pair<Symbol, Symbol>> answers;
   for (auto& [component, tests] : marks) {
     auto depth = static_cast<std::uint32_t>(tests.size());
@@ -1265,24 +1333,39 @@ static void guard_turns(Cfg& cfg) {
       const auto [it, fresh] = answers.try_emplace(mark);
       if (!fresh) continue;
       auto& [yes, no] = it->second;
-      yes = mark.first;
+      yes = mark.symbol;
+      no = kNone;
       const auto& ways = cfg.productionsOf[index_of(yes)];
       Production q;
+      if (writes[index_of(yes)]) {
+        q.lhs = cfg.nonterminals++;
+        q.rhs = {yes};
+        q.region = mark.scope;
+        q.capture = true;
+        if (mark.take != kNone) q.takes = {mark.take};
+        yes = nonterminal(q.lhs);
+        cfg.recordInputs.push_back({static_cast<std::uint32_t>(cfg.productions.size()), {}, {}});
+        cfg.productions.push_back(std::move(q));
+        if (!tested[index_of(mark.symbol)]) continue;
+        q = {};
+      }
       if (ways.size() == 1 && atomic_test(cfg.productions[ways.front()])) {
         q = cfg.productions[ways.front()];
       } else {
         // A compound condition uses the same subparser for both answers.
         auto& start = cfg.productions.emplace_back();
         start.lhs = cfg.nonterminals++;
-        start.rhs = {yes};
-        start.region = mark.second;
+        start.rhs = {mark.symbol};
+        start.region = mark.scope;
         start.start = true;
         cfg.conditions.push_back(static_cast<std::uint32_t>(cfg.productions.size() - 1));
-        q.region = mark.second;
-        q.lhs = cfg.nonterminals++;
-        yes = nonterminal(q.lhs);
+        q.region = mark.scope;
         q.tests.emplace_back().condition = static_cast<std::uint32_t>(cfg.conditions.size());
-        cfg.productions.push_back(q);
+        if (yes == mark.symbol) {
+          q.lhs = cfg.nonterminals++;
+          yes = nonterminal(q.lhs);
+          cfg.productions.push_back(q);
+        }
       }
       q.lhs = cfg.nonterminals++;
       no = nonterminal(q.lhs);
@@ -1297,12 +1380,18 @@ static void guard_turns(Cfg& cfg) {
     auto& q = cfg.productions[p];
     const auto at = turn[p] ? prefix[p] : 0;
     if (at) {
-      const auto& tests = marks.at(group[q.lhs]);
-      auto& opening = cfg.openings.emplace_back();
-      q.opening = static_cast<std::uint32_t>(cfg.openings.size());
+      std::vector<Cfg::Opening> opening;
       for (std::uint32_t i = 0; i < at; ++i) {
-        const Mark mark{guard[index_of(q.rhs[i])], q.scope_at(i)};
-        opening.emplace_back(index_of(answers.at(mark).first), tests.at(mark));
+        const auto mark = mark_at(q, i);
+        const auto nt = index_of(mark.symbol);
+        if (tested[nt] || writes[nt])
+          opening.push_back({index_of(answers.at(mark).first), marks.at(group[q.lhs]).at(mark), writes[nt]});
+      }
+      if (std::ranges::any_of(opening, &Cfg::Opening::writes))
+        cfg.recordInputs.push_back({p, q.rhs, q.takes});
+      if (!opening.empty()) {
+        cfg.openings.push_back(std::move(opening));
+        q.opening = static_cast<std::uint32_t>(cfg.openings.size());
       }
       q.erase(0, at);
     }
@@ -1321,9 +1410,10 @@ static void guard_turns(Cfg& cfg) {
       const auto lhs = depth + 1 == tests.size() ? outer : nonterminal(cfg.nonterminals++);
       const auto [yes, no] = answers.at(mark);
       for (const auto answer : {yes, no}) {
+        if (answer == kNone) continue;
         auto& q = cfg.productions.emplace_back();
         q.lhs = index_of(lhs);
-        q.region = mark.second;
+        q.region = mark.scope;
         q.rhs = {answer, target};
       }
       target = lhs;
@@ -1334,10 +1424,10 @@ static void guard_turns(Cfg& cfg) {
 }
 
 void bar_tests(Cfg& cfg) {
-  if (std::ranges::none_of(cfg.productions, atomic_test)) return;
   const auto original = cfg.productions.size();
   const auto originalNts = cfg.nonterminals;
   guard_turns(cfg);
+  if (std::ranges::none_of(cfg.productions, atomic_test)) return;
   std::vector<const Test*> refuses(cfg.nonterminals, nullptr);
   const auto ends_scope = [&](std::uint16_t t) {
     return t != kEndOfInput &&

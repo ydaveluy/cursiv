@@ -19,6 +19,7 @@ struct Base : cursiv::GrammarSpec {
 
 struct ChainBase : cursiv::GrammarSpec {
   struct WS : terminal<some(cr<" ">)> {};
+  struct NOTE : terminal<lit<"#">> {};
   struct InnerEnd : rule<skip(ignore<WS>, hide<>, eof)> {};
   struct StrictEnd : rule<tight(eof)> {};
   struct EmptyRule : rule<create<Empty>> {};
@@ -32,6 +33,10 @@ struct ChainBase : cursiv::GrammarSpec {
                                   lit<"x"> + tight(eof))) |
             (lit<"call"> +
              skip(ignore<WS>, hide<>, lit<"x"> + ref<StrictEnd>)) |
+            (lit<"choice"> + skip(ignore<WS, NOTE>, hide<>, lit<":"> +
+                (skip(ignore<NOTE>, hide<>, option(lit<"x">) + eof) |
+                 (option(lit<"y">) + gap::none + eof)))) |
+            (lit<"more"> + skip(ignore<WS>, hide<>, lit<":"> + tight(!eof) + eof)) |
             (lit<"node"> + skip(ignore<WS>, hide<>, eof) +
              assign<&ChainDocument::empty>(ref<EmptyRule>)))> {};
   using entry = Root;

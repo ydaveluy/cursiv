@@ -288,9 +288,10 @@ struct SaidValues final : cursiv::fuzzer::GrammarActions {
   }
   cursiv::fuzzer::Write writeText(cursiv::ElementId e,
                                   cursiv::ElementId payload,
+                                  cursiv::fuzzer::WalkTree& tree,
                                   cursiv::AstNode& owner,
                                   std::string_view text) const override {
-    return kDmActions.writeText(e, payload, owner, text);
+    return kDmActions.writeText(e, payload, tree, owner, text);
   }
   std::optional<std::string> denote(cursiv::ElementId e,
                                     std::string_view text) const override {

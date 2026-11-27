@@ -166,8 +166,10 @@ class Matching {
     Ranges pending{};
   };
   void watch() {
-    if ((++_steps & 0x3FF) == 0) throwIfCancelled(_machine->stop);
+    if ((++_steps & 0x3FF) == 0) charge();
   }
+  // Reads the stop, and charges the token read its last 1024 steps.
+  void charge();
   template <class Each>
   void add(Ranges& ranges, TextOffset first, TextOffset last, Each each);
   // Whether the test of end `x` holds at `p`.

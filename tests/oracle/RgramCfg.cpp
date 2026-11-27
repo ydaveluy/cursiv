@@ -19,14 +19,13 @@ using Sym = RgramCfg::Sym;
 Sym term(char t) { return {.kind = Sym::Kind::term, .tok = t}; }
 Sym call(unsigned nt) { return {.kind = Sym::Kind::nt, .nt = nt}; }
 
-// A condition inside a region reads the region's own bytes: past its last
-// token, a blank and not the next token.
+// The token beyond a region and its gap belong to the caller. EOF uses the
+// scope in which it is tested, including its trailing trivia.
 bool holds(const Sym& s, const RgramDocument& d, unsigned i) {
   const auto n = static_cast<unsigned>(d.toks.size());
-  const bool blank = s.tight && !d.gaps[i].empty();
-  const char here = i < n && !blank ? d.toks[i] : '\0';
-  static const std::string kEmpty;
-  const std::string& gap = s.tight ? kEmpty : d.gaps[i];
+  const char here = i < n ? d.toks[i] : '\0';
+  const std::string& gap = d.gaps[i];
+  const bool end = i == n && (!s.tight || gap.empty());
   const bool line = gap.find('\n') != std::string::npos;
   switch (s.cond) {
     case RgramCond::notTok:
@@ -44,9 +43,9 @@ bool holds(const Sym& s, const RgramDocument& d, unsigned i) {
     case RgramCond::notNone:
       return !gap.empty();
     case RgramCond::lineOrEof:
-      return line || i == n;
+      return line || end;
     case RgramCond::eof:
-      return i == n;
+      return end;
   }
   return false;
 }

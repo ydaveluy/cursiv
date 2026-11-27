@@ -11,6 +11,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -445,10 +446,10 @@ class Repair {
   Token _refused{nullptr, 0};
   Indented _refusedIn{};
   std::vector<std::uint32_t> _refusedOn;
-  // The terminals read as literals, and per fault mode and spelling whether
-  // a word misspells one.
+  // The terminals read as literals, and per fault mode and place whether the
+  // word there misspells one.
   std::vector<std::uint64_t> _literals;
-  std::map<std::pair<std::uint16_t, std::string_view>, bool> _misspelt;
+  std::map<std::tuple<std::uint16_t, TextOffset, TextOffset>, bool> _misspelt;
 
   // Where the end-of-text insertions were last made, and the fewest tokens
   // that then completed the stack.
@@ -565,7 +566,7 @@ std::uint32_t Repair::completion(std::uint32_t node, std::uint16_t symbol) {
       std::uint32_t own = item.rest;
       if (read != KernelCost::kNone) {
         if (item.symbol == KernelCost::kNone) continue;
-        own = item.after;
+        own = item.rest - t.yields[item.symbol];
         if (read != item.symbol) {
           const std::uint32_t* first = t.corners + t.cornerAt[item.symbol];
           const std::uint32_t* last = t.corners + t.cornerAt[item.symbol + 1];
@@ -1321,8 +1322,8 @@ void Repair::expand(std::uint32_t at) {
 }
 
 // Whether `word` is a word that reads as a literal misspelt, in the mode the
-// text of a fault is read in: one a literal spells does not. Asked once a
-// spelling.
+// text of a fault is read in: one a literal spells whole does not, read in the
+// word's own bytes. Asked once a place, the text past the word deciding guards.
 bool Repair::misspelt(Word word) {
   if (word.begin == word.end || !m.word_at(m.src + word.begin)) return false;
   if (_literals.empty()) {
@@ -1331,12 +1332,14 @@ bool Repair::misspelt(Word word) {
       if ((t.terminalRank[term] & 1) == 0) _literals[term / 64] |= std::uint64_t{1} << (term % 64);
   }
   const ModeLexer mode(m, m.under(), true);
-  const std::pair key{mode.mode, std::string_view(m.src + word.begin, m.src + word.end)};
+  const std::tuple key{mode.mode, word.begin, word.end};
   if (const auto known = _misspelt.find(key); known != _misspelt.end()) return known->second;
+  Machine own(t, {m.src, word.end}, m.tape, m.stop);
+  own.matchTies = m.matchTies;
+  own.ended = t.terminalCount;
   bool misspells = false;
-  if (const Token whole = mode_token(mode.mode, word.begin);
-      offset(whole.end) != word.end || whole.terminal() >= t.terminalCount ||
-      (m.rank(whole) & 1) != 0) {
+  if (const Token whole = own.walk(m.src + word.begin, mode.mode, 1, m.src + word.begin);
+      whole.end != own.end || whole.terminal() >= t.terminalCount || (m.rank(whole) & 1) != 0) {
     LexWork work{lex_room()};
     const std::vector<Typo> found = typos(mode, _literals, word.begin, word.end, work);
     charge(work);
@@ -1372,7 +1375,7 @@ bool Repair::back() {
   // The token in hand first: the states reduced on it as on the name it reads as.
   Word word{m.tok.begin(m), offset(m.tok.end)};
   bool found = m.tok.terminal() < t.terminalCount && misspelt(word);
-  for (NodeCount i = m.tape.records(); i != _mark.records && tokens != kBackTokens && !spent();) {
+  for (NodeCount i = m.tape.records(); i > _mark.records && tokens != kBackTokens && !spent();) {
     const CstNode& n = m.tape.at(--i);
     ++scanned;
     if (n.subtreeSize != 1 || n.isHidden() || n.isRecovered() || n.begin == n.end) continue;

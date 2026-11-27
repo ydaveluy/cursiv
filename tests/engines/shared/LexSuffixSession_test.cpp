@@ -63,7 +63,7 @@ struct Lexer {
     }
     tables.byteClass = classes.data();
     tables.lexNext = {next.data(), rows.data()};
-    tables.lexStates = states.data();
+    tables.lexStates = states;
     tables.lexRun = runs.data();
     tables.runSets = sets.data();
     tables.runScanners = scanners.data();
@@ -559,7 +559,8 @@ void lexical_refusals_expire_only_after_real_shifts() {
   };
   lexer.tables.drive = [](Machine& m) {
     if (!m.resume) return m.split(token(0, m.src + 1, 1), 2, 2);
-    for (TextOffset i = m.at - m.src; m.src + i != m.end; ++i) {
+    for (; m.at != m.end; ++m.at) {
+      const auto i = static_cast<TextOffset>(m.at - m.src);
       if (m.src[i] == '?' && i != m.tok.begin(m)) return m.split(token(i, m.src + i + 1, 1), 6, 2);
       m.tape.leaf(i, i, 0);
       if (m.src[i] == ' ') m.tape.hidden(i, i + 1, 0);
@@ -685,7 +686,7 @@ void long_token_and_trivia_scans_read_the_stop() {
   Lexer lexer;
   const std::array<std::uint8_t, 256> classes{};
   const std::uint16_t next[] = {0, 1};
-  const std::uint8_t flags[] = {0, 2};
+  const std::uint8_t flags[] = {0, 6};
   const TextMonitor monitor{classes.data(), next, flags, 1};
   lexer.tables.monitors = &monitor;
   std::string text(kWatchedBytes + 2, ' ');
@@ -715,7 +716,8 @@ void long_token_and_trivia_scans_read_the_stop() {
   cancelled([&] { (void)m.gap_reads(0, m.src, m.end, true); });
   cancelled([&] { (void)m.indentation(m.src, m.indented); });
   cancelled([&] { (void)tokenMachine.ending(token(0, tokenMachine.end, 1)); });
-  cancelled([&] { (void)matching.echoes(tokenMachine, {0, static_cast<TextOffset>(word.size())}, 0); });
+  const auto half = static_cast<TextOffset>(word.size() / 2);
+  cancelled([&] { (void)matching.echoes(tokenMachine, {0, half}, half); });
   cancelled([&] { matching.remember(m); });
 }
 

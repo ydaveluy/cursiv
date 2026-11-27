@@ -35,12 +35,19 @@ inline const CursivActions<G> kActions{};
 
 // A document may hold any byte a character range admits, so a report shows it
 // escaped rather than letting a control byte cut the line.
-inline void show(std::string_view text) {
-  for (const char c : text)
-    if (c >= 0x20 && c < 0x7f)
-      std::putchar(c);
-    else
-      std::printf("\\x%02x", static_cast<unsigned char>(c));
+inline std::string shown(std::string_view text) {
+  constexpr char hex[] = "0123456789abcdef";
+  std::string out;
+  for (const unsigned char c : text) {
+    if (c == '\\') out += "\\\\";
+    else if (c >= 0x20 && c < 0x7f) out += static_cast<char>(c);
+    else {
+      out += "\\x";
+      out += hex[c >> 4];
+      out += hex[c & 15];
+    }
+  }
+  return out;
 }
 
 struct Lane {
@@ -91,19 +98,15 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
 
     const cursiv::ParseResult r = parser.parse(d.text);
     if (!r.cst().accepted()) {
-      if (++lane.refused == 1) {
-        std::printf("FAIL %s: a generated document is refused: <<", lang);
-        show(d.text);
-        std::printf(">>\n");
-      }
+      if (++lane.refused == 1)
+        std::printf("FAIL %s: a generated document is refused: <<%s>>\n",
+                    lang, shown(d.text).c_str());
       continue;
     }
     if (r.cst().recovered()) {
-      if (++lane.repaired == 1) {
-        std::printf("FAIL %s: a generated document is repaired: <<", lang);
-        show(d.text);
-        std::printf(">>\n");
-      }
+      if (++lane.repaired == 1)
+        std::printf("FAIL %s: a generated document is repaired: <<%s>>\n",
+                    lang, shown(d.text).c_str());
       continue;
     }
 
@@ -113,7 +116,7 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
       std::printf(
           "FAIL %s: the tape the parser wrote is not a tree: %s at record %u "
           "for <<%s>>\n",
-          lang, inv.why.c_str(), inv.at, d.text.c_str());
+          lang, inv.why.c_str(), inv.at, shown(d.text).c_str());
 
     // The oracle checks the AST, not the CST. An accepted, unrepaired document
     // without a tree breaks the contract.
@@ -121,7 +124,7 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
       if (++lane.nullTrees == 1)
         std::printf(
             "FAIL %s: a document is accepted with no tree built: <<%s>>\n",
-            lang, d.text.c_str());
+            lang, shown(d.text).c_str());
       continue;
     }
     if (d.tree == nullptr) {
@@ -137,8 +140,8 @@ std::uint64_t run(const char* lang, const cursiv::Parser& parser,
       std::printf(
           "FAIL %s/#%u at %s: the grammar builds <%s>, the engine built <%s> "
           "for <<%s>>\n",
-          lang, i, diff.where.c_str(), diff.want.c_str(), diff.got.c_str(),
-          d.text.c_str());
+          lang, i, diff.where.c_str(), shown(diff.want).c_str(),
+          shown(diff.got).c_str(), shown(d.text).c_str());
   }
 
   std::printf(

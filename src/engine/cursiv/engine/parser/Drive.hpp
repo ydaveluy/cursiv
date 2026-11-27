@@ -66,16 +66,17 @@ struct Drive {
     return static_cast<std::uint16_t>(L::operands[at] >> 16);
   }
 
-  // The ends of a run, entered as the steps are.
   template <class M>
   [[gnu::cold]] CURSIV_NOINLINE CURSIV_PRESERVE_NONE static Exit accepted(
       M& m, const char*, NodeCount, const char*, std::uint64_t) {
     m.accept();
     return Exit::accepted;
   }
+  // Resume at p, or at the end of the last shift when p crossed a muted newline.
   template <class M>
   [[gnu::cold]] CURSIV_NOINLINE CURSIV_PRESERVE_NONE static Exit refuse(
-      M& m, const char*, NodeCount, const char* tokenEnd, std::uint64_t tokenHead) {
+      M& m, const char* p, NodeCount, const char* tokenEnd, std::uint64_t tokenHead) {
+    if constexpr (!L::mutedLines) m.at = p;
     return m.refused({tokenEnd, tokenHead});
   }
   // Room made for a step's writes, the hidden trivia written first with
@@ -111,8 +112,7 @@ struct Drive {
       if (m.indented.bracket == 0 && m.lexing().line_start(p)) [[unlikely]] {
         const Token made = m.lexing().indentation(p, m.indented);
         indented = made.end != nullptr &&
-                   (follows(m.under(), made.terminal()) ||
-                    !m.lexing().first_ends_line(p, m.lexing().t.stateMode[m.under()]));
+                   !m.lexing().first_ends_line(p, m.lexing().t.stateMode[m.under()]);
         if (indented) tok = made;
       }
     }
@@ -183,6 +183,8 @@ struct Drive {
       if constexpr (M::kSteps) m.shift(state, entry, tok);
       else m.template shift<L::matching>(state, entry, tok);
     }
+    // A muted newline advances the lexer alone. Its gap still begins after this shift.
+    if constexpr (L::mutedLines && !M::kSteps) m.at = tok.end;
     if constexpr (Nest == Nesting::indent) m.lexing().indent(m.indented, tok);
     if constexpr (Nest == Nesting::dedent) m.lexing().dedent(m.indented);
     if constexpr (Nest == Nesting::open || Nest == Nesting::block)
@@ -214,8 +216,9 @@ struct Drive {
   // A token the state has several actions for: the run stops, and goes on
   // from the arm chosen.
   template <class M>
-  CURSIV_PRESERVE_NONE static Exit split(M& m, const char*, NodeCount at, const char* tokenEnd,
+  CURSIV_PRESERVE_NONE static Exit split(M& m, const char* p, NodeCount at, const char* tokenEnd,
                                          std::uint64_t tokenHead) {
+    if constexpr (!L::mutedLines) m.at = p;
     return m.split({tokenEnd, tokenHead}, L::cells[at].value, element(at), extra(at));
   }
 
@@ -276,7 +279,10 @@ struct Drive {
                                        std::uint64_t tokenHead) {
     const Token tok{tokenEnd, tokenHead};
     const TieCheck& check = L::ties[L::operands[at]];
-    if (ties(m, tok, check)) return m.split(tok, check.first, check.count, check.rereads);
+    if (ties(m, tok, check)) {
+      if constexpr (!L::mutedLines) m.at = p;
+      return m.split(tok, check.first, check.count, check.rereads);
+    }
     const std::uint32_t next = L::cells[at].value;
     CURSIV_MUSTTAIL return L::template steps<M>[L::cells[next].step](m, p, next, tokenEnd, tokenHead);
   }
@@ -336,7 +342,8 @@ struct Drive {
                                             const char* tokenEnd, std::uint64_t tokenHead) {
     Token tok{tokenEnd, tokenHead};
     const ActionCell c = L::cells[at];
-    if (!m.lexing().takes_tied(tok, c.terminal)) return m.refused(tok);
+    if (!m.lexing().takes_tied(tok, c.terminal))
+      CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
     tok = m.lexing().as_tied(tok, c.terminal, m.lexing().t.tied[c.terminal].mixed);
     CURSIV_MUSTTAIL return L::template steps<M>[L::cells[c.value].step](m, p, c.value, tok.end,
                                                                         tok.head);
@@ -351,7 +358,8 @@ struct Drive {
     const ActionCell c = L::cells[at];
     const std::uint16_t solo = m.lexing().t.tied[c.terminal].solo;
     tok = m.lexing().t.modes[solo].read(m.lexing(), m.lexing().src + tok.begin(m.lexing()), solo);
-    if (tok.terminal() != c.terminal) return m.refused({tokenEnd, tokenHead});
+    if (tok.terminal() != c.terminal)
+      CURSIV_MUSTTAIL return refuse<M>(m, p, at, tokenEnd, tokenHead);
     CURSIV_MUSTTAIL return L::template steps<M>[L::cells[c.value].step](m, p, c.value, tok.end,
                                                                         tok.head);
   }
@@ -398,11 +406,11 @@ struct Drive {
   // or with no token for the step that enters the state on top; the step is
   // written for its `Form`, the `Shapes` of its record and its tests `Holds`.
   template <class M, bool Held, unsigned Form, unsigned Shapes, auto Holds = nullptr,
-            const Reduction* R = nullptr>
+            const Reduction* R = nullptr, int... Prefix>
   CURSIV_PRESERVE_NONE static Exit reduce(M& m, const char* p, NodeCount at, const char* tokenEnd,
                                           std::uint64_t tokenHead) {
     constexpr bool nothing = (Form & kReadsNothing) != 0;
-    const Token tok = Held ? Token{tokenEnd, tokenHead} : Token{nullptr, 0};
+    Token tok = Held ? Token{tokenEnd, tokenHead} : Token{nullptr, 0};
     // Written for reduction `R`, the step knows it where it is written.
     const Reduction& r =
         R != nullptr ? *R : L::reductions[Held ? L::cells[at].step : L::enters[m.under()]];
@@ -414,11 +422,17 @@ struct Drive {
         return Exit::joined;
     if constexpr (!std::is_null_pointer_v<decltype(Holds)>)
       if (!Holds(m, p, tok)) CURSIV_MUSTTAIL return again<M>(m, p, at, tokenEnd, tokenHead);
+    if constexpr ((Form & kSettlesEnd) != 0)
+      if (tok.terminal() == kEndOfInput) tok.head |= kTold;
     if (!m.roomy(nothing, (Shapes & (kRecordEmpty | kRecordSeveral)) != 0)) [[unlikely]]
-      CURSIV_MUSTTAIL return room_then<M, false, &reduce<M, Held, Form, Shapes, Holds, R>>(
+      CURSIV_MUSTTAIL return room_then<M, false, &reduce<M, Held, Form, Shapes, Holds, R, Prefix...>>(
           m, p, at, tokenEnd, tokenHead);
     NodeCount open = nothing ? m.here(r.production) : m.pop(r.size, r.production);
     if constexpr ((Form & kTakes) != 0) takes(m, r, std::make_index_sequence<kMostTakes>{});
+    if constexpr (sizeof...(Prefix) != 0 && !std::is_same_v<M, Explorer>) {
+      if constexpr (((Prefix < 0) || ...)) m.lexing().capture_prefix(open);
+      else (m.lexing().recall_prefix(open, Prefix), ...);
+    }
     GotoCell to = (Form & kOneSite) != 0 ? r.to : L::gotos[L::gotoBase[m.under()] + r.lhs];
     // A machine that steps ends a turn of a list by the state that reduces it.
     if constexpr (M::kSteps) {

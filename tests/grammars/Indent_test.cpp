@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "cursiv/CstInvariants.hpp"
 #include "cursiv/grammar/Grammar.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
@@ -147,6 +148,14 @@ void an_indent_resolves_a_cell() {
   const auto engine = tindent::synthetic::generated::Cases::createParser();
   CHECK(parse_with(*engine, "fork a b\n  c\n    d\n  e\nf\n") ==
         "ab(c(d) e) f");
+  // The longer token stands however many levels closed before it.
+  CHECK(parse_with(*engine, "apart p:\n q:\n  q:\n   q:\n    q:\n     t\n s=ab\n+\n") ==
+        "(p q(q(q(q(t)))) s)");
+  std::string block = "picked h\n";
+  for (std::string run = " "; run.size() <= 7; run += ' ') {
+    block += run + "a\n";
+    CHECK(parse_with(*engine, block + "xqab!") == "h x");
+  }
 }
 
 // At the end of the input a reading's dedent is refused by its guard, and the
@@ -253,9 +262,15 @@ int main() {
   // A deeper line where no suite opens is an error, and the parse goes on.
   CHECK(recovers(*engine, "a\n  b\nc\n"));
   CHECK(parse("a:\n  b\n") == "a(b)");
-  // A line whose first token ends it is as blank: its blanks open no level.
+  // A line of trivia the newline ends keeps the level wherever it stands, even
+  // where an indent may open a body or a dedent close a suite; a deeper line
+  // another token reads to its end is content, an indent no suite takes.
   CHECK(parse("lead\n   # c\na\n") == "a");
-  CHECK(parse("lead\n   ; c\n; d\na:\n  b\n") == "a(b)");
+  CHECK(parse("lead\na\n   # c") == "a");
+  CHECK(parse("loose\n  a\n  b\n") == "a b");
+  CHECK(parse("loose\n    # c\na\nb\n") == "a b");
+  CHECK(parse("loose\na:\n  b\n# c\n  d\n") == "a(b d)");
+  CHECK(parse("lead\n   ; c\n; d\na:\n  b\n").empty());
   // EOF also ends a blank line: its run must neither open a suite nor
   // disagree with an existing level, even when tabs and spaces differ.
   for (const std::string_view blank : {"  ", "\t", " \t "}) {
@@ -363,6 +378,34 @@ int main() {
   CHECK(parse_with(*folded, "a:\n  b #x\n  c\n") == "a(b c)");
   CHECK(parse_with(*folded, "crlf (\r\nx)\r\n") == "x");
   CHECK(parse_with(*folded, "crlf (\nx)\n") == "x");
+  // The gap before a token runs back over a line end a bracket mutes, and
+  // over the comments on either side of it.
+  CHECK(parse_with(*folded, "touch (x!)\n") == "x ");
+  CHECK(recovers(*folded, "touch (x\n!)\n"));
+  CHECK(parse_with(*folded, "touch (x\n?)\n") == "x ");
+  CHECK(recovers(*folded, "touch (x ?)\n"));
+  for (const char gap : {'\n', ' '}) {
+    const std::string text = std::string("touch (x/*a*/") + gap + "/*b*/;)\n";
+    const auto r = folded->parse(text);
+    CHECK(r.accepted && r.diagnostics.empty() == (gap == '\n'));
+    if (gap == '\n') {
+      std::string tree;
+      if (const auto* doc = r.valueAs<tindent::ast::Node>()) spell(doc, tree);
+      CHECK(tree == " x ");
+    }
+    CHECK(cursiv::fuzzer::detail::CstInvariants{}.run(r.cst(), text).ok);
+    std::vector<std::string_view> comments;
+    r.cst().visitLeaves([&](const cursiv::CstLeaf& leaf) {
+      if (leaf.hidden) comments.push_back(r.cst().text(leaf.id));
+    });
+    CHECK((comments == std::vector<std::string_view>{"/*a*/", "/*b*/"}));
+  }
+  CHECK(parse_with(*folded, "touch (x~\n?)\n") == "x ~");
+  CHECK(recovers(*folded, "touch (x~\n!)\n"));
+  CHECK(parse_with(*folded, "touch (x~/*a*/\n/*b*/;)\n") == "x ~");
+  // So does the gap a condition is tested with.
+  CHECK(parse_with(*folded, "touch (x\n%%)\n") == "x ");
+  CHECK(recovers(*folded, "touch (x %%)\n"));
   {
     const auto r = folded->parse("a:\n  b\n  #x\n      c\n");
     CHECK(r.accepted && !r.diagnostics.empty());

@@ -22,7 +22,7 @@ struct RgramCfg {
     char tok = 0;
     unsigned nt = 0;
     RgramCond cond = RgramCond::eof;
-    // A condition inside a region reads the gap as empty.
+    // EOF inside a tight region requires the physical end.
     bool tight = false;
   };
   struct Prod {

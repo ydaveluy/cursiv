@@ -10,11 +10,13 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "cursiv/engine/parser/Tables.hpp"
+#include "cursiv/grammar/ElementId.hpp"
 #include "cursiv/syntax-tree/CstRun.hpp"
 #include "cursiv/utils/Cancellation.hpp"
 #include "cursiv/utils/macros.hpp"
@@ -48,7 +50,7 @@ struct Token {
 
 // A mixed terminal matched its literal branch.
 inline constexpr std::uint64_t kLiteralBranch = std::uint64_t{1} << 17;
-// A split fixed the terminal of a tie for the rest of this reading.
+// This reading has settled the token's spelling, including an explicit end.
 inline constexpr std::uint64_t kTold = std::uint64_t{1} << 18;
 // The line's indentation uses a different blank at an open level.
 inline constexpr std::uint64_t kMixedIndent = std::uint64_t{1} << 19;
@@ -171,10 +173,12 @@ struct LexWork {
 };
 
 struct Machine {
-  // Completion keeps a predicate that inspected the cut with the reading that asked it.
-  using Predicate = bool (*)(Machine&, const char*, Token, Indented);
+  // Completion keeps a predicate that inspected the cut with the reading that
+  // asked it: where it reads on from, where its gap begins, its token.
+  using Predicate = bool (*)(Machine&, const char*, const char*, Token, Indented);
   struct CaretTests {
-    virtual bool test(Predicate predicate, const char* p, Token tok, Indented indent) = 0;
+    virtual bool test(Predicate predicate, const char* p, const char* gap, Token tok,
+                      Indented indent) = 0;
     std::uint32_t chain = 0;
   };
   Machine(const Tables& tables, std::string_view text, CstRun& tape,
@@ -212,11 +216,8 @@ struct Machine {
     resume = 2 * under();
     return Exit::shifted;
   }
-  // Resume with the refused token after every shift and any pending repair.
   Exit refused(Token held) {
     tok = held;
-    if (const auto records = tape.records(); records != 0)
-      at = std::max(at, src + tape.at(records - 1).end);
     resume = 2 * under() + 1;
     return Exit::refused;
   }
@@ -269,8 +270,16 @@ struct Machine {
   // the line.
   // The muted levels the line closes are let go from `at`.
   [[nodiscard]] Token indentation(const char* p, Indented& at);
-  // Whether the first token `mode` reads from `p`, past trivia, ends a line.
-  [[nodiscard]] bool first_ends_line(const char* p, std::uint16_t mode);
+  // Whether the first token `mode` reads from line start `p`, past trivia, is
+  // the line's terminal, after `indentation` read the line's blanks: a byte
+  // past them that neither trivia nor that terminal reads begins content.
+  [[nodiscard]] bool first_ends_line(const char* p, std::uint16_t mode) {
+    const char* const q = lineBlanks.data() + lineBlanks.size();
+    return t.lineLeads != nullptr &&
+           (q == end || t.lineLeads[byte_at(q)] != 0) &&
+           walks_to_line(p, mode);
+  }
+  [[gnu::cold]] [[nodiscard]] bool walks_to_line(const char* p, std::uint16_t mode);
   // The token in hand read from `p`, or an empty line terminal before it
   // where the gap holds a line end inside a trivia the grammar names and
   // state `state` reads that terminal as it reads a line end standing there.
@@ -362,6 +371,13 @@ struct Machine {
   // with `kSkippedElement` for entry, text a repair skipped.
   CURSIV_ALWAYS_INLINE void hide(TextOffset begin, const char* until, std::uint32_t entry) {
     const Hidden value{begin, static_cast<TextOffset>(until - src), entry};
+    if (entry != kSkippedElement && !tape.empty() && value.end <= tape.at(tape.records() - 1).end) [[unlikely]] {
+      // A reread can meet a comment already written before an empty reduction.
+      const auto records = std::span(tape.data(), tape.records());
+      const auto first = std::ranges::lower_bound(records, value.end, {}, &CstNode::end);
+      if (first->isHidden() && first->begin == begin && first->end == value.end &&
+          static_cast<ElementId>(first->element()) == entry) return;
+    }
     if (pending.size() != pending.capacity()) [[likely]]
       pending.push_back(value);
     else
@@ -392,7 +408,6 @@ struct Machine {
     }
     return false;
   }
-
   // Whether the text from `from` up to `to` reads as monitor `monitor`
   // reads: all of it with `whole`, else some part of it.
   [[nodiscard]] bool gap_reads(std::uint32_t monitor, const char* from, const char* to,
@@ -436,6 +451,16 @@ struct Machine {
   // condition names, whatever follows. Its first token is `tok`, the one
   // that comes: one that reads less of its text reads none of it.
   [[nodiscard]] bool reads(std::uint32_t state, const char* from, Token tok, Indented indented);
+  // Whether `tok` is the line's terminal or a copy of it with no text, which
+  // stands for a line end a trivia carried, read where the gap's last byte ends.
+  [[nodiscard]] bool carried_line(Token tok) const {
+    const TextOffset at = tok.begin(*this);
+    return src + at == tok.end && at != 0 && t.lines != kNoToken &&
+           tok.terminal() < t.terminalCount && t.inSet(t.lines, tok.terminal());
+  }
+  [[nodiscard]] Token line_at(const char* at, std::uint32_t mode) {
+    return walk(at - 1, mode, t.transition(1, t.byteClass['\n']), at);
+  }
   // The set of terminals ending together that the text of `tok` leads to.
   [[nodiscard]] std::uint32_t ending(Token tok) const;
   // Whether the text of `tok`, not told yet, is also read as the other
@@ -547,6 +572,21 @@ struct Machine {
     pending.push_back(value);
   }
 
+  // Empty children of a left recursion are read once at its opening. Each
+  // turn writes its copies, placed ahead of the operand when the tree closes.
+  void capture_prefix(NodeCount open);
+  void recall_prefix(NodeCount open, std::uint32_t depth);
+  void place_prefixes();
+  struct Prefixes {
+    struct Capture { std::size_t level, previous, begin; NodeCount open, count; };
+    struct Recall { NodeCount open, from, count; std::size_t source; };
+    std::vector<CstNode> records;
+    std::vector<std::size_t> levels;
+    std::vector<Capture> captures;
+    std::vector<Recall> recalls;
+  };
+  std::unique_ptr<Prefixes> prefixes;
+
   // The machine as a run sets out: what `rewind` puts back to read the text
   // from there again. One made new stands at the start of the text.
   struct Checkpoint {
@@ -558,6 +598,7 @@ struct Machine {
     std::vector<std::uint32_t> plan;
     std::size_t planned = 0;
     NodeCount records = 0;
+    std::size_t captures = 0, recalls = 0;
     TextOffset at = 0;
     Token tok{nullptr, 0};
     std::uint32_t resume = 0;
@@ -687,10 +728,10 @@ struct Machine {
     return tok;
   }
   template <class Test>
-  bool check(Test predicate, const char* p, Token tok, Indented indent) {
+  bool check(Test predicate, const char* p, const char* gap, Token tok, Indented indent) {
     if (_caretTests && ended != kEndOfInput) [[unlikely]]
-      return _caretTests->test(predicate, p, tok, indent);
-    return predicate(*this, p, tok, indent);
+      return _caretTests->test(predicate, p, gap, tok, indent);
+    return predicate(*this, p, gap, tok, indent);
   }
   // An opening belongs to its outer level. A muted level closes without a dedent.
   struct Level {

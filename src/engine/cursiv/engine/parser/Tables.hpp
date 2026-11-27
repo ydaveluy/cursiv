@@ -62,8 +62,9 @@ struct LexResolution {
 };
 
 // A small automaton over bytes that a condition reads text with: state 0 is
-// dead and state 1 the start. `flags[state]` has bit 0 where the text read
-// matches, bit 1 where it does if the input ends there.
+// dead and state 1 the start. `flags[state]` has bit 0 where a match ends in
+// the text read, bit 1 where one does if the input ends there, and bit 2 where
+// the whole text read is one if the input ends there.
 struct TextMonitor {
   const std::uint8_t* byteClass = nullptr;
   const std::uint16_t* next = nullptr;
@@ -366,31 +367,30 @@ enum : unsigned {
   kStays = 16,
   kMayStay = 32,
   // Records of its symbols take an entry over.
-  kTakes = 64
+  kTakes = 64,
+  // A positive end test settles the trailing trivia for subsequent end tests.
+  kSettlesEnd = 128
 };
 
 // An item of a state's kernel as the fewest tokens that complete a stack read
 // it: the nonterminal it completes (`kAccept` for a start), the nonterminal
-// after its dot (`kNone` for a terminal or none), the symbols before the dot,
-// the tokens it still reads and those past that nonterminal; `kNever` where no
-// tokens complete it.
+// after its dot (`kNone` for a terminal or none), the symbols before the dot
+// and the tokens it still reads; `kNever` where no tokens complete it.
 struct KernelCost {
   static constexpr std::uint16_t kAccept = 0xFFFF;
   static constexpr std::uint16_t kNone = 0xFFFF;
-  static constexpr std::uint16_t kNever = 0x1FF;
+  static constexpr std::uint16_t kNever = 0xFFFF;
   std::uint16_t lhs;
   std::uint16_t symbol;
   std::uint16_t dot;
   std::uint16_t rest;
-  std::uint16_t after;
   [[nodiscard]] static constexpr KernelCost of(std::uint64_t v) {
     return {static_cast<std::uint16_t>(v), static_cast<std::uint16_t>(v >> 16),
-            static_cast<std::uint16_t>((v >> 32) & 0x1FFF), static_cast<std::uint16_t>((v >> 45) & kNever),
-            static_cast<std::uint16_t>((v >> 54) & kNever)};
+            static_cast<std::uint16_t>(v >> 32), static_cast<std::uint16_t>(v >> 48)};
   }
   [[nodiscard]] constexpr std::uint64_t packed() const {
     return std::uint64_t{lhs} | std::uint64_t{symbol} << 16 | std::uint64_t{dot} << 32 |
-           std::uint64_t{rest} << 45 | std::uint64_t{after} << 54;
+           std::uint64_t{rest} << 48;
   }
 };
 
@@ -442,7 +442,7 @@ struct Tables {
   // The lexer's automaton. State 0 is dead and state 1 the start.
   const std::uint8_t* byteClass = nullptr;
   LexBlocks lexNext;
-  const LexState* lexStates = nullptr;
+  std::span<const LexState> lexStates;
   std::uint16_t transition(std::uint32_t state, unsigned cls) const {
     return lexNext.at(lexStates[state].row, cls);
   }
@@ -483,9 +483,14 @@ struct Tables {
   const std::uint8_t* terminalRank = nullptr;
   const std::uint16_t* terminalEntry = nullptr;
   std::uint16_t terminalCount = 0;
-  // The terminals indentation makes, 0 where the language reads none.
+  // The terminals indentation makes, 0 where the language reads none, and
+  // the set of `terminalSets` of the one that ends a line and its copies.
   std::uint16_t indentTerminal = 0;
   std::uint16_t dedentTerminal = 0;
+  std::uint16_t lines = kNoToken;
+  // Per byte, nonzero where trivia or the line's terminal may read it first
+  // past a line's blanks; null where the language reads no indentation.
+  const std::uint8_t* lineLeads = nullptr;
   // The set of `terminalSets` of the trivia whose line ends end a line.
   std::uint16_t newlineIn = 0;
   // Per terminal, its place where terminals are listed for a reader: the
@@ -513,13 +518,15 @@ struct Tables {
   const std::uint16_t* forced = nullptr;
   // Per state, its kernel's list of items as `KernelCost`s; per nonterminal a
   // kernel item reads, those its derivations begin with that one completes,
-  // ascending, with the fewest tokens past it (`nonterminal | tokens << 16`):
-  // what the fewest tokens that complete a stack are read from.
+  // ascending, with the fewest tokens past it (`nonterminal | tokens << 16`),
+  // and the fewest tokens it reads: what the fewest tokens that complete a
+  // stack are read from.
   const std::uint16_t* kernelOf = nullptr;
   const std::uint32_t* kernelAt = nullptr;
   const std::uint64_t* kernels = nullptr;
   const std::uint32_t* cornerAt = nullptr;
   const std::uint32_t* corners = nullptr;
+  const std::uint16_t* yields = nullptr;
   // Per state, the set of the terminals whose insertion there may be
   // required: those of its `close` set, and those it reduces on that a state
   // reached then may need.

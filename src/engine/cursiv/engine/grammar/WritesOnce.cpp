@@ -87,14 +87,16 @@ class Check {
           const std::uint32_t primary = _image.rule(*stage.primary);
           wrote = made(primary);
           Members operands;
+          unsigned twice = none;
           for (const void* row : {stage.leftRow, stage.rightRow})
-            if (const auto m = member(row); m != none && !operands.insert(m)) refuse(m, "twice");
+            if (const auto m = member(row); m != none && !operands.insert(m)) twice = m;
           for (std::uint32_t l = 0; l < stage.levelCount; ++l) {
             // A binary level writes both operands; a prefix or postfix level
             // builds its own node: its operand member, then its operator's.
             const Association group = stage.levels[l].group;
             const bool unary = group == Association::Prefix || group == Association::Postfix;
             const unsigned operand = member(stage.levels[l].operandRow);
+            if (!unary && twice != none) refuse(twice, "twice");
             if (!unary) wrote.merge(operands);
             if (operand != none) wrote.insert(operand);
             for (std::uint32_t o = 0; o < stage.levels[l].count; ++o)

@@ -72,7 +72,14 @@ struct Suite : cursiv::GrammarSpec {
   struct DOTTED : terminal<lit<"."> + repeat<8, 8>(cr<"a-zA-Z">) + many(w)> {};
   // A run of `y`, and a count of them that the run reads on into.
   struct RUN : terminal<some(lit<"y">)> {};
+  struct AT : terminal<cr<"@">> {};
   struct COUNT : terminal<repeat<1, 32>(repeat<1, 32>(lit<"y">))> {};
+  // A dash, a tilde and eight letters or more as one token, which only a
+  // condition that begins a token earlier reads.
+  struct DASHED : terminal<lit<"-~"> + repeat<8, 8>(cr<"a-v">) + many(cr<"a-v">)> {};
+  // Counts of `w` read only at the end of the text, a long one and a short one.
+  struct LAST : terminal<repeat<1, 32>(repeat<1, 32>(lit<"w">)) + eof> {};
+  struct FEW : terminal<repeat<1, 8>(repeat<1, 8>(lit<"w">)) + eof> {};
   struct Root
       : rule<create<ast::Items>(
             (lit<"path:"> + many(append<&ast::Items::items>(ref<PathItem>))) |
@@ -84,6 +91,21 @@ struct Suite : cursiv::GrammarSpec {
                  assign<&ast::Item::name>(ref<ID>)) |
                 (lit<"-"> + lit<"."> + lit<";">)))) |
             (lit<"chain:"> + ref<RUN> + option(ref<COUNT>)) |
+            (lit<"crossed:"> + append<&ast::Items::items>(create<ast::Item>(
+                (&(lit<"x"> + ref<DASHED>) + lit<"x"> + lit<"-"> + lit<"~"> +
+                 assign<&ast::Item::name>(ref<ID>)) |
+                (lit<"x"> + lit<"-"> + lit<"~"> + lit<";">)))) |
+            (lit<"last:"> + (ref<LAST> | lit<";">)) |
+            (lit<"few:"> + (ref<FEW> | lit<";">)) |
+            // A literal `a` read only before `;c`, beside a name.
+            (lit<"guard:"> + ((ref<ID> + lit<";"> + option(lit<"c"> | lit<"e">)) |
+                              (lit<"a", &lit<";c">> + lit<";"> + lit<"d">))) |
+            (lit<"guard2:"> + ((ref<ID> + lit<";"> + lit<":"> + option(lit<"e">)) |
+                               (lit<"a", &lit<";:c">> + lit<";"> + lit<":"> + lit<"c"> + lit<"!">))) |
+            (lit<"middle:"> + append<&ast::Items::items>(create<ast::Item>(
+                lit<"!@~#"> | (lit<"!"> + ((lit<"@", &lit<"~qqq">> + lit<"~"> +
+                                            assign<&ast::Item::name>(ref<ID>)) |
+                                           (ref<AT> + lit<"~"> + lit<";">)))))) |
             (lit<"hide:"> + append<&ast::Items::items>(create<ast::Named>(
                 assign<&ast::Item::target>(ref<ID>) + lit<":"> +
                 assign<&ast::Named::target>(kw<"done">)))) |

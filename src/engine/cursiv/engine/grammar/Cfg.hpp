@@ -104,6 +104,7 @@ struct Production {
   std::vector<Test> tests;
   // One-based index of the conditions checked at the opening of this left recursion.
   std::uint32_t opening = 0;
+  bool capture = false;
   // Per place before a symbol or at the end, ascending, the terminals the
   // token that comes there may not be: what is reduced there, nothing read
   // since, is not reduced on them.
@@ -233,13 +234,13 @@ struct Cfg {
   std::vector<Region> regions;
   // The terminals indentation makes, 0 where the grammar reads none; the
   // brackets that open with line ends muted, those that open a block where
-  // they count, those that close; the terminal that ends a line, and the
-  // trivia whose line ends end one too.
+  // they count, those that close; the terminal that ends a line, it and the
+  // copies operators read of it, and the trivia whose line ends end one too.
   std::uint16_t indent = 0;
   std::uint16_t dedent = 0;
   std::vector<std::uint16_t> opens, blocks, closes;
   std::uint16_t newline = 0;
-  std::vector<std::uint16_t> newlineIn;
+  std::vector<std::uint16_t> lines, newlineIn;
   // The nonterminals that may read nothing: no terminal, every symbol one
   // that may.
   [[nodiscard]] std::vector<bool> nullable() const {
@@ -298,7 +299,22 @@ struct Cfg {
   // The productions that read what a condition over several tokens tests.
   std::vector<std::uint32_t> conditions;
   // Per guarded reduction, its true markers and their depths below the left operand.
-  std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>> openings;
+  struct Opening { std::uint32_t mark, depth; bool writes; };
+  std::vector<std::vector<Opening>> openings;
+  // The children a reduction writes when empty prefixes are held at the opening.
+  struct RecordInputs {
+    std::uint32_t production;
+    std::vector<Symbol> rhs;
+    std::vector<std::uint32_t> takes;
+  };
+  std::vector<RecordInputs> recordInputs;
+  void swapRecordInputs() {
+    for (auto& input : recordInputs) {
+      auto& p = productions[input.production];
+      p.rhs.swap(input.rhs);
+      p.takes.swap(input.takes);
+    }
+  }
   std::vector<Infix> infixes;
   // Per data rule, the action that converts what it read and its nonterminal.
   std::vector<std::pair<std::uint16_t, std::uint32_t>> dataRules;

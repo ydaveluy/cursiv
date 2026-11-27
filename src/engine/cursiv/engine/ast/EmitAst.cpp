@@ -518,7 +518,7 @@ class Emitter {
     }
     _recordCount = writesOf.size() + all.size();
     table("::cursiv::engine::DeferredWrite", "kDeferred", writesOf, "{}");
-    table("::cursiv::engine::AstRecord", "kRecords", all, "nullptr");
+    table("::cursiv::engine::AstRecord", "kRecords", all, "{}");
     conversions();
     table("::std::uint8_t", "kNarrowOf", _narrowOf, "255");
     _out += "\n";

@@ -41,11 +41,19 @@ inline constexpr std::size_t kNoSpell = ~std::size_t{0};
 struct SpellCtx {
   DecisionSource& src;
   Veto veto{};
+  Veto continuation{};
+
+  Veto boundary() const {
+    Veto after = veto;
+    if (continuation.on) after.forbid(continuation.bytes);
+    return after;
+  }
 
   // Whether the next byte spelled may be `b`: the refusal ends there.
   bool admits(char b) {
     const bool ok = !veto.forbids(static_cast<unsigned char>(b));
     veto.clear();
+    continuation.clear();
     return ok;
   }
 };
@@ -81,8 +89,7 @@ struct SpellCtx {
         break;
       }
   }
-  cx.veto.clear();
-  if (pick < 0) return false;
+  if (pick < 0 || !cx.admits(static_cast<char>(pick))) return false;
   out.push_back(static_cast<char>(pick));
   return true;
 }
@@ -106,6 +113,14 @@ inline constexpr cursiv::detail::CharSet kClassAscii = [] {
       s.set(static_cast<unsigned char>(b));
   return s;
 }();
+// An unbounded class run takes every following byte in its ASCII set.
+template <class E>
+inline constexpr const cursiv::detail::CharSet* run_bytes = nullptr;
+template <std::size_t Min, std::uint64_t M, bool N, str S>
+inline constexpr auto run_bytes<cursiv::detail::Repeat<
+    Min, cursiv::detail::kUnbounded, cursiv::detail::CpSet<M, N, S>>> =
+    &kClassAscii<M, N, S>;
+
 // The first bytes refusing a class forbids: its ASCII characters, and every
 // byte past ASCII when it may hold a scalar there.
 template <std::uint64_t M, bool N, str S>
@@ -128,6 +143,25 @@ template <std::uint64_t M, bool N, str S>
 struct veto_of<cursiv::detail::CpSet<M, N, S>> {
   static constexpr bool any = true;
   static constexpr const cursiv::detail::CharSet& set = kClassVeto<M, N, S>;
+};
+// Avoiding the first byte of each spelling suffices to satisfy its refusal.
+template <str S, bool CI, class Gd, bool K>
+struct veto_of<cursiv::detail::Lit<S, CI, Gd, K>> {
+  static constexpr bool any = S.size() != 0;
+  static constexpr auto set = [] {
+    cursiv::detail::CharSet bytes;
+    if constexpr (any) {
+      const auto first = static_cast<unsigned char>(S[0]);
+      bytes.set(first);
+      if constexpr (CI) {
+        if (first < 0x80)
+          cursiv::detail::for_each_other_case(first, [&](char32_t cp) { bytes.set(cp); });
+        else
+          for (unsigned b = 0xc2; b <= 0xf4; ++b) bytes.set(b);
+      }
+    }
+    return bytes;
+  }();
 };
 
 template <class C, class E, unsigned D>
@@ -374,13 +408,13 @@ struct SpellOf<C, cursiv::detail::Repeat<Mn, Mx, E>, D> {
     }
     for (std::size_t i = 0; i < n; ++i)
       if (!Spell<C, E, D>::run(out, st, cx)) return false;
+    if (const auto* bytes = run_bytes<cursiv::detail::Repeat<Mn, Mx, E>>)
+      cx.continuation.forbid(*bytes);
     return true;
   }
 };
 
-// What a refusal names, when it names a class or a terminal reading one:
-// everything else the walk cannot honour, so a spelling the lexer then reads
-// short is a refused document, not a silent one.
+// A refusal can name a class, a literal, a choice or a terminal alias.
 template <class C, class E, unsigned D>
 struct vetoed_by : veto_of<E> {};
 template <class C, class R, unsigned D>
@@ -391,10 +425,17 @@ struct vetoed_by<C, cursiv::detail::Ref<R>, D>
                 D - 1> {};
 template <class C, class R>
 struct vetoed_by<C, cursiv::detail::Ref<R>, 0> : veto_of<void> {};
+template <class C, class... Es, unsigned D>
+struct vetoed_by<C, cursiv::detail::Choice<Es...>, D> {
+  static constexpr bool any = (vetoed_by<C, Es, D>::any && ...);
+  static constexpr auto set = [] {
+    cursiv::detail::CharSet bytes;
+    if constexpr (any) (bytes.merge(vetoed_by<C, Es, D>::set), ...);
+    return bytes;
+  }();
+};
 
-// An assertion spells nothing. One that refuses a class forbids its first
-// bytes to the next byte spelled, whatever spells it; any other refuses the
-// spelling.
+// A negative assertion constrains the next byte without consuming it.
 template <class C, class E, unsigned D>
 struct SpellOf<C, cursiv::detail::Not<E>, D> {
   static constexpr std::size_t min = 0;
@@ -413,7 +454,10 @@ template <class C, unsigned D>
 struct SpellOf<C, cursiv::detail::Eof, D> {
   static constexpr std::size_t min = 0;
   static constexpr Reach reach() { return Reach{{}, {}, true}; }
-  static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
+  static bool run(std::string&, SpellStyle, SpellCtx& cx) {
+    cx.veto.forbid(kEveryByte);
+    return true;
+  }
 };
 template <class C, class E, unsigned D>
 struct SpellOf<C, cursiv::detail::And<E>, D> {
@@ -422,8 +466,7 @@ struct SpellOf<C, cursiv::detail::And<E>, D> {
   static bool run(std::string&, SpellStyle, SpellCtx&) { return false; }
 };
 
-// A run the end of the text also closes is spelled closed: the end of the
-// text stands once, where the document ends.
+// Prefer an explicit closer to consuming the rest of the document.
 template <class Cl>
 struct closed_by {
   using type = Cl;
@@ -475,6 +518,69 @@ struct SpellOf<C, cursiv::detail::Create<T, E>, D> : Spell<C, E, D> {};
 template <class C, class T, auto P, class E, unsigned D>
 struct SpellOf<C, cursiv::detail::Nest<T, P, E>, D> : Spell<C, E, D> {};
 
+// Spell an optional final line ending explicitly so that the next token
+// cannot become part of this line. The raw speller still admits the EOF form.
+template <class C, class E>
+struct close_line {
+  static void finish(std::string&, SpellCtx&) {}
+};
+template <class C, class... Es>
+struct close_line<C, cursiv::detail::Seq<Es...>>
+    : close_line<C, cursiv::detail::pack_at_t<sizeof...(Es) - 1, Es...>> {};
+template <class C, class E>
+struct close_line<C, cursiv::detail::Repeat<0, 1, E>> {
+  static void finish(std::string& out, SpellCtx& cx) {
+    using End = Spell<C, E, kSpellDepth>;
+    constexpr bool line = [] {
+      const Reach r = End::reach();
+      auto bytes = r.first | r.last;
+      if (r.nullable || (!bytes.test('\n') && !bytes.test('\r'))) return false;
+      bytes.set('\n');
+      bytes.set('\r');
+      return bytes.count() == 2;
+    }();
+    if constexpr (line) {
+      if (out.empty() || out.back() == '\n' || out.back() == '\r') return;
+      SpellCtx end{cx.src, cx.veto};
+      std::string word;
+      if (End::run(word, SpellStyle::shortest, end) &&
+          (word == "\n" || word == "\r" || word == "\r\n")) {
+        out += word;
+        cx.veto = end.veto;
+        cx.continuation = end.continuation;
+      }
+    }
+  }
+};
+
+inline bool all_bytes(std::string_view word, const cursiv::detail::CharSet& bytes) {
+  return std::ranges::all_of(word, [&](unsigned char c) { return bytes.test(c); });
+}
+
+// Veto a byte when it would extend this word to a longer match.
+template <class E>
+void guard_extension(E, std::string_view, Veto&) {}
+template <std::size_t Min, std::uint64_t M, bool N, str S>
+void guard_extension(cursiv::detail::Repeat<Min, cursiv::detail::kUnbounded,
+                                            cursiv::detail::CpSet<M, N, S>>,
+                     std::string_view word, Veto& after) {
+  const auto& bytes = kClassAscii<M, N, S>;
+  if (word.size() >= Min && all_bytes(word, bytes)) after.forbid(bytes);
+}
+template <str S, bool CI, bool K>
+void guard_extension(cursiv::detail::Lit<S, CI, void, K>, std::string_view word,
+                     Veto& after) {
+  if (S.size() == word.size() + 1 && S.view().starts_with(word)) {
+    after.bytes.set(static_cast<unsigned char>(S[word.size()]));
+    after.on = true;
+  }
+}
+template <class... Es>
+void guard_extension(cursiv::detail::Choice<Es...>, std::string_view word,
+                     Veto& after) {
+  (guard_extension(Es{}, word, after), ...);
+}
+
 // One token's spelling, and in `after` what its last assertion forbids the
 // byte after it.
 template <class C, class E>
@@ -482,7 +588,11 @@ bool spell_token(std::string& out, SpellStyle st, DecisionSource& src,
                  Veto& after) {
   SpellCtx cx{src};
   const bool spelled = Spell<C, E, kSpellDepth>::run(out, st, cx);
-  after = cx.veto;
+  if (spelled) {
+    close_line<C, std::remove_cvref_t<E>>::finish(out, cx);
+    guard_extension(std::remove_cvref_t<E>{}, out, cx.veto);
+  }
+  after = cx.boundary();
   return spelled;
 }
 
@@ -496,6 +606,8 @@ constexpr Reach reach_token() {
 struct Trivia {
   std::string word;
   cursiv::detail::CharSet ends;
+  const cursiv::detail::CharSet* run;
+  Veto after;
 };
 
 using SpellFn = bool (*)(std::string&, SpellStyle, DecisionSource&, Veto&);
@@ -508,7 +620,9 @@ consteval SpellFn spell_entry() {
   if constexpr (model::kind_of<T>() == ElementKind::terminal_rule)
     return &spell_token<
         C, typename cursiv::detail::Normalize<C>::template body<T>>;
-  else if constexpr (model::kind_of<T>() == ElementKind::literal ||
+  else if constexpr (model::kind_of<T>() == ElementKind::character_range ||
+                     model::kind_of<T>() == ElementKind::any_character ||
+                     model::kind_of<T>() == ElementKind::literal ||
                      model::kind_of<T>() == ElementKind::through)
     return &spell_token<C, T>;
   else
@@ -523,7 +637,9 @@ consteval ReachFn reach_entry() {
   if constexpr (model::kind_of<T>() == ElementKind::terminal_rule)
     return &reach_token<
         C, typename cursiv::detail::Normalize<C>::template body<T>>;
-  else if constexpr (model::kind_of<T>() == ElementKind::through)
+  else if constexpr (model::kind_of<T>() == ElementKind::through ||
+                     model::kind_of<T>() == ElementKind::character_range ||
+                     model::kind_of<T>() == ElementKind::any_character)
     return &reach_token<C, T>;
   else
     return nullptr;
@@ -536,17 +652,26 @@ template <class C, class... Rs>
 struct lex_trivia<C, TypeList<Rs...>> {
   static std::vector<Trivia> of() {
     std::vector<Trivia> out;
-    (add<typename cursiv::detail::Normalize<C>::template body<Rs>>(out), ...);
+    if constexpr (sizeof...(Rs) != 0)
+      for (const bool line : {false, true})
+        (add<typename cursiv::detail::Normalize<C>::template body<Rs>>(out, line), ...);
     return out;
   }
   template <class B>
-  static void add(std::vector<Trivia>& out) {
+  static void add(std::vector<Trivia>& out, bool line) {
     FixedSource none;
     SpellCtx cx{none};
-    Trivia t{{}, Spell<C, B, kSpellDepth>::reach().last};
+    if (line) {
+      constexpr auto breaks = kClassAscii<0, false, R"(\r\n)">;
+      cx.veto.forbid(~breaks);
+    }
+    Trivia t{{}, Spell<C, B, kSpellDepth>::reach().last,
+             run_bytes<std::remove_cvref_t<B>>, {}};
     if (Spell<C, B, kSpellDepth>::run(t.word, SpellStyle::shortest, cx) &&
-        !t.word.empty())
+        !t.word.empty() && (!line || t.word == "\n" || t.word == "\r" || t.word == "\r\n")) {
+      t.after = cx.boundary();
       out.push_back(std::move(t));
+    }
   }
 };
 
@@ -568,6 +693,13 @@ struct lex_rows<C, TypeList<Es...>> {
       region_trivia<C, std::remove_cvref_t<Es>>...};
   static constexpr std::array<ReachFn, sizeof...(Es)> kReach = {
       reach_entry<C, Es>()...};
+  static constexpr std::array<bool, sizeof...(Es)> kMayCollide = {[] {
+    if constexpr (model::kind_of<Es>() == ElementKind::terminal_rule) {
+      using Body = typename cursiv::detail::Normalize<C>::template body<Es>;
+      return model::text_of<std::remove_cvref_t<Body>>::value.empty();
+    }
+    return false;
+  }()...};
 };
 
 template <class C>
@@ -581,6 +713,13 @@ struct CursivLexicon final : GrammarLexicon {
                        typename cursiv::detail::Normalize<C>::hidden>::type>::
                     of()) {
     using Rows = lex_rows<C, typename model::positions_for<C>::type>;
+    if constexpr (!std::is_void_v<typename C::indent_newline>) {
+      _lines.resize(g.positionCount());
+      mark_line(C::template ref<typename C::indent_newline>, LineRole::newline);
+      mark_line(C::indent_open, LineRole::open);
+      mark_line(C::indent_block, LineRole::block);
+      mark_line(C::indent_close, LineRole::close);
+    }
     _regionTrivia.resize(Rows::kTrivia.size());
     _reads.resize(Rows::kReach.size());
     _first.resize(Rows::kReach.size());
@@ -592,6 +731,7 @@ struct CursivLexicon final : GrammarLexicon {
       _first[e] = r.first;
     }
     for (ElementId e = 0; e < g.positionCount(); ++e) {
+      if (g.kindOf(e) == ElementKind::layout) _usesLayout = true;
       const std::string_view t = g.textOf(e);
       if (t.empty()) continue;
       _reserved.push_back(folded(t));
@@ -610,17 +750,19 @@ struct CursivLexicon final : GrammarLexicon {
     if (e >= Rows::kSpell.size() || Rows::kSpell[e] == nullptr) return {};
     std::string out;
     if (!Rows::kSpell[e](out, st, src, after)) return {};
+    // An explicit literal terminal may own that spelling in its context.
+    if (Rows::kMayCollide[e] &&
+        std::binary_search(_reserved.begin(), _reserved.end(), folded(out))) return {};
     return out;
   }
-
-  // Case-folded on both sides: a case-insensitive keyword reserves every
-  // spelling of itself, and over-refusing costs one more attempt.
-  [[nodiscard]] bool reserved(std::string_view s) const override {
-    return std::binary_search(_reserved.begin(), _reserved.end(), folded(s));
+  [[nodiscard]] LineRole lineRole(ElementId e) const override {
+    return e < _lines.size() ? _lines[e] : LineRole::none;
   }
 
-  [[nodiscard]] std::string_view separator(ElementId scope, ElementId before,
-                                           ElementId after) const override {
+  [[nodiscard]] std::string_view separator(ElementId scope, ElementId before, ElementId after,
+                                           std::string_view previous, char next) const override {
+    const auto eol = [](char c) { return c == '\r' || c == '\n'; };
+    if (_usesLayout && eol(previous.back()) && !eol(next)) return {};
     const auto reads = [this](ElementId e, std::string_view word) {
       return e < _reads.size() &&
              std::ranges::any_of(word, [&](char c) {
@@ -637,12 +779,26 @@ struct CursivLexicon final : GrammarLexicon {
     };
     for (const Trivia& t :
          scope < _regionTrivia.size() ? _regionTrivia[scope] : _trivia)
-      if (!reads(before, t.word) && !reads(after, t.word) && !runsOn(t))
+      if (!t.after.forbids(static_cast<unsigned char>(next)) &&
+          !reads(before, t.word) && !reads(after, t.word) && !runsOn(t) &&
+          !(t.run && all_bytes(previous, *t.run)))
         return t.word;
     return {};
   }
 
  private:
+  template <class E>
+  void mark_line(E, LineRole role) {
+    if constexpr (!std::is_same_v<E, cursiv::detail::Epsilon>) {
+      constexpr ElementId pos = model::op_row<C, E>;
+      if constexpr (pos != kNoElement) _lines[pos] = role;
+    }
+  }
+  template <class... Es>
+  void mark_line(cursiv::detail::Choice<Es...>, LineRole role) {
+    (mark_line(Es{}, role), ...);
+  }
+
   [[nodiscard]] static std::string folded(std::string_view s) {
     std::string out;
     out.reserve(s.size());
@@ -666,6 +822,8 @@ struct CursivLexicon final : GrammarLexicon {
   std::vector<cursiv::detail::CharSet> _reads;
   std::vector<cursiv::detail::CharSet> _first;
   std::vector<std::string> _reserved;
+  std::vector<LineRole> _lines;
+  bool _usesLayout = false;
 };
 
 }  // namespace cursiv::fuzzer::detail

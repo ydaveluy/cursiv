@@ -176,9 +176,12 @@ bool AstBuilder::parts(NodeId id, std::span<const std::string_view>& out) {
       _gathering.pop_back();
       _parts.resize(base);
       _parts.push_back(text);
-      if (auto& largest = _gathering.back().kept; kept.text.data() == text.data() &&
-          kept.text.size() == text.size() && text.size() > largest.text.size())
-        largest = kept;
+      // A text that lies within the one its join kept grows in that storage.
+      if (auto& largest = _gathering.back().kept;
+          !std::less{}(text.data(), kept.text.data()) &&
+          !std::less{}(kept.text.data() + kept.text.size(), text.data() + text.size()) &&
+          text.size() > largest.text.size())
+        largest = {kept.storage, text};
       continue;
     }
     const NodeId record = at.begin + at.left - 1;

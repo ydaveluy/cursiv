@@ -170,6 +170,7 @@ struct Base : cursiv::GrammarSpec {
   struct Angle : terminal<lit<"<"> + some(lit<"="> | lit<":">) + lit<">">> {};
   // The mark may begin on a byte that is not yet a whole character.
   struct Echo : terminal<mark<A>(any) + same<A>> {};
+  struct Doubled : terminal<mark<A>(some(cr<"a">)) + same<A>> {};
   struct Line : terminal<through(mark<A>(some(cr<"^\n">)), lit<"\n"> + same<A>)> {};
   // Tags that share a short name are still two tags.
   struct Namesakes : terminal<mark<one::Tag>(any) + mark<two::Tag>(any) + same<one::Tag> +
@@ -192,6 +193,7 @@ struct Base : cursiv::GrammarSpec {
             (lit<"nested:"> + assign<&Node::text>(ref<ViaNested>)) |
             (lit<"probe:"> + &ref<Probe> + assign<&Node::text>(ref<Angle>)) |
             (lit<"echo:"> + assign<&Node::text>(ref<Echo>)) |
+            (lit<"doubled:"> + assign<&Node::text>(ref<Doubled>)) |
             (lit<"line:"> + assign<&Node::text>(ref<Line>)) |
             (lit<"namesakes:"> + assign<&Node::text>(ref<Namesakes>)) |
             (lit<"slots:"> + assign<&Node::text>(ref<Slots>)) |
@@ -227,6 +229,14 @@ struct Base : cursiv::GrammarSpec {
                                               same<Label>)> {};
   struct SameOnly : terminal<through(mark<Equals>(some(cr<"=x">)) + lit<":">,
                                      same<Equals>)> {};
+  // The body is read a second time after an assertion read it.
+  static constexpr auto SameBody = many(!same<Equals> + any) + same<Equals>;
+  struct Twice
+      : terminal<mark<Equals>(some(cr<"=x">)) + lit<":"> + &SameBody + SameBody> {};
+  // A call's ends resume its caller, the furthest first.
+  struct Run : terminal<many(lit<"=">) + option(lit<"("> + ref<Run> + lit<")">)> {};
+  struct Resumed
+      : terminal<mark<Equals>(some(cr<"=x">)) + lit<":"> + ref<Run> + same<Equals>> {};
   struct EmptySame
       : terminal<through(mark<Label>(many(cr<"#">)) + lit<":">, same<Label>)> {
   };
@@ -280,6 +290,8 @@ struct Base : cursiv::GrammarSpec {
             (lit<"explicit:"> + Read<ExplicitHeredoc>) |
             (lit<"padding:"> + Read<Padding>) |
             (lit<"same:"> + Read<SameOnly>) |
+            (lit<"twice:"> + Read<Twice>) |
+            (lit<"resumed:"> + Read<Resumed>) |
             (lit<"empty:"> + Read<EmptySame>) |
             (lit<"char-fast:"> + Read<ScalarFast>) |
             (lit<"char-explicit:"> + Read<ScalarExplicit>) |

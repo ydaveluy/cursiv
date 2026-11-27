@@ -8,17 +8,18 @@
 
 namespace cursiv::engine {
 
-// The searches under way, the innermost condition's last; and by mark of the
-// token read, the furthest text found to repeat its first bytes, from `from`
-// to `to`, and the Z-function of its first `z.size()` bytes.
+// The searches under way, the innermost condition's last; and by start of a
+// mark of the token read, the Z-function of the first `bound` bytes of text
+// there, as far as places were asked, with its furthest repeat, `from`-`to`.
 struct Machine::Matchings {
   std::deque<Matching> searches;
   struct Echo {
+    std::vector<TextOffset> z;
+    TextOffset bound = 0;
     TextOffset from = 0;
     TextOffset to = 0;
-    std::vector<TextOffset> z;
   };
-  std::map<std::uint64_t, Echo> echoes;
+  std::map<TextOffset, Echo> echoes;
   // By entry and place, read with no mark: the ends a search of the token
   // found, and whether a search read it every way. What is known may rest on
   // the end of the text where the token read it since `reads`.
@@ -28,46 +29,77 @@ struct Machine::Matchings {
   };
   std::map<std::uint64_t, Known> known;
   std::uint64_t reads = 0;
+  // The steps the token's searches took, from `from`, and the furthest place
+  // a thread of theirs read to.
+  std::uint64_t spent = 0;
+  TextOffset from = 0;
+  TextOffset reach = 0;
 };
 
-// Reads as the Z-algorithm: inside the furthest repeat of the mark found, the
-// mark's own Z-function gives what repeats, and only bytes past it are read.
+namespace {
+
+// The work the matcher spends on one terminal at one place: steps per byte of
+// the text its threads read, and steps for any text. A terminal that needs
+// more, as one whose calls each end at many places can, is not read there.
+constexpr std::uint64_t kStepsPerByte = 64;
+constexpr std::uint64_t kSteps = std::uint64_t{1} << 20;
+struct Overspent {};
+
+}  // namespace
+
+void Matching::charge() {
+  throwIfCancelled(_machine->stop);
+  if (Machine::Matchings* const all = _machine->matchings.get();
+      all != nullptr && (all->spent += 1024) > kStepsPerByte * (all->reach - all->from + 1) + kSteps)
+    throw Overspent{};
+}
+
+// Every mark from one start is a prefix of the text there: its Z-function, read
+// left to right, tells each place, asked in any order, how much of it repeats.
+// A mark ends by the place asked, so the text up to twice that place is enough.
 bool Matching::echoes(Machine& m, MatchMark mark, TextOffset at) {
   if (mark.end == kNoMark) return false;
-  const auto length = mark.end - mark.begin;
-  const char* const captured = m.src + mark.begin;
-  const auto available = static_cast<TextOffset>(m.end - m.src) - at;
-  auto& known = m.matchings->echoes[std::uint64_t{mark.begin} << 32 | mark.end];
-  // How many bytes of the mark `x`, at place `i`, repeats, up to `limit`; the
-  // furthest repeat found, from `from` to `to`, moves on past them.
-  const auto repeats = [&](TextOffset& from, TextOffset& to, const char* x, TextOffset i,
-                           TextOffset limit) {
-    TextOffset k = from <= i && i < to ? std::min(to - i, known.z[i - from]) : 0;
-    while (k < limit) {
-      const char* const next = m.watched(x + k, x + limit);
-      const char* const differs = std::mismatch(x + k, next, captured + k).first;
-      k = static_cast<TextOffset>(differs - x);
+  const char* const start = m.src + mark.begin;
+  const auto text = static_cast<TextOffset>(m.end - start);
+  const TextOffset place = at - mark.begin;
+  Machine::Matchings::Echo& known = m.matchings->echoes[mark.begin];
+  if (const TextOffset needs = place + std::min(place, text - place);
+      known.z.empty() || known.bound < needs) {
+    const TextOffset bound =
+        std::max(needs, known.bound + std::min(known.bound, text - known.bound));
+    known = {{bound}, bound};
+  }
+  for (auto i = static_cast<TextOffset>(known.z.size()); i <= place;) {
+    // Past the furthest repeat, a place that does not begin as the text does
+    // repeats nothing.
+    if (const char* const limit = start + std::min(place + 1, known.bound);
+        i >= known.to && start + i < limit) {
+      const char* const edge = m.watched(start + i, limit);
+      const auto* hit = static_cast<const char*>(std::memchr(start + i, *start, edge - start - i));
+      if (hit != start + i) {
+        i = static_cast<TextOffset>((hit != nullptr ? hit : edge) - start);
+        known.z.resize(i, 0);
+        continue;
+      }
+    }
+    watch();
+    TextOffset k = i < known.to ? std::min(known.to - i, known.z[i - known.from]) : 0;
+    while (i + k < known.bound) {
+      const char* const next = m.watched(start + i + k, start + known.bound);
+      const char* const differs = std::mismatch(start + i + k, next, start + k).first;
+      k = static_cast<TextOffset>(differs - start - i);
       if (differs != next) break;
     }
-    if (i + k > to) {
-      from = i;
-      to = i + k;
+    known.z.push_back(k);
+    if (i + k > known.to) {
+      known.from = i;
+      known.to = i + k;
     }
-    return k;
-  };
-  if (const TextOffset w = known.to - known.from;
-      known.from <= at && at < known.to && known.z.size() < w) {
-    const TextOffset size = w + std::min(w, length - w);
-    known.z.assign(size, size);
-    for (TextOffset i = 1, l = 0, r = 0; i < size; ++i) {
-      watch();
-      known.z[i] = repeats(l, r, captured + i, i, size - i);
-    }
+    ++i;
   }
-  const TextOffset same =
-      repeats(known.from, known.to, m.src + at, at, std::min(length, available));
-  if (same == length) return true;
-  m.observe_end(same == available);
+  const TextOffset length = mark.end - mark.begin, same = known.z[place];
+  if (same >= length) return true;
+  m.observe_end(place + same == text);
   return false;
 }
 
@@ -180,6 +212,7 @@ void Matching::run(Machine& m) {
         if (m.observe_end(p == end) || !passes(m, th, state, p, limit)) break;
       state = a.next.at(here.row, a.byteClass[byte_at(p++)]);
     }
+    m.matchings->reach = std::max(m.matchings->reach, static_cast<TextOffset>(p - src));
   }
 }
 
@@ -328,7 +361,7 @@ void Matching::remember(Machine& m) {
   }
 }
 
-const char* Machine::match(std::uint32_t entry, const char* begin) {
+const char* Machine::match(std::uint32_t entry, const char* begin) try {
   if (const char* found; Matching::alone(*this, entry, begin, found)) return found;
   const auto from = static_cast<TextOffset>(begin - src);
   const std::uint64_t place = stretch_place(kUnmatched, entry, from);
@@ -337,6 +370,8 @@ const char* Machine::match(std::uint32_t entry, const char* begin) {
   matchings->echoes.clear();
   matchings->known.clear();
   matchings->reads = endReads;
+  matchings->spent = 0;
+  matchings->from = matchings->reach = from;
   std::deque<Matching>& searches = matchings->searches;
   if (searches.empty()) searches.emplace_back();
   MatchThread first;
@@ -390,6 +425,11 @@ const char* Machine::match(std::uint32_t entry, const char* begin) {
   }
   s->remember(*this);
   return s->found() ? src + s->furthest() : nullptr;
+} catch (const Overspent&) {
+  // Read no further, the terminal is not read at this place again.
+  const auto from = static_cast<TextOffset>(begin - src);
+  stretches.try_emplace(stretch_place(kUnmatched, entry, from), from, endReads != matchings->reads);
+  return nullptr;
 }
 
 }  // namespace cursiv::engine

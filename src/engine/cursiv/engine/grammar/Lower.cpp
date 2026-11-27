@@ -48,7 +48,8 @@ class Lowering {
     if (std::ranges::adjacent_find(named) != named.end())
       throw Refused("a bracket is named by more than one of indent_open, indent_block and "
                     "indent_close");
-    if (_image.indentNewline != kNoImage) _cfg.newline = terminal_of(_image.indentNewline);
+    if (_image.indentNewline != kNoImage)
+      _cfg.lines.assign(1, _cfg.newline = terminal_of(_image.indentNewline));
     inspect_rules(_image.rule(*_desc.entry));
     const Symbol entry = rule_symbol(_image.rule(*_desc.entry));
     if (is_terminal(entry)) throw Refused("the entry is a terminal");
@@ -165,28 +166,63 @@ class Lowering {
       return known->second;
     };
     // Per nonterminal that reads nothing but tests of the gap, as `!gap::line`
-    // lowers or a rule of such tests does, those tests as a list of `tested`;
-    // kSeveral for any other. Each is told once, after what it reads.
-    constexpr std::uint32_t kUntold = kNone - 2;
-    std::vector<std::uint32_t> gaps;
+    // lowers or a rule of such tests does, those tests as a list of `tested`,
+    // where alternatives of them are one: a condition that reads them; kSeveral
+    // for any other. Each is told once, after what it reads, one met again while
+    // open reads more.
+    constexpr std::uint32_t kUntold = kNone - 2, kOpen = kNone - 3;
+    std::vector<std::uint32_t> gaps, ways, entered(_cfg.nonterminals, kNone);
+    // The conditions made so, by the production that reads them.
+    std::map<std::uint32_t, std::uint32_t> asks;
     const auto gaps_of = [&](std::uint32_t nt) {
       gaps.resize(_cfg.nonterminals, kUntold);
-      for (std::vector<std::uint32_t> open{nt}; gaps[nt] == kUntold;) {
+      for (std::vector<std::uint32_t> open{nt}; !open.empty();) {
         const std::uint32_t at = open.back();
-        const std::vector<std::uint32_t>& of = _cfg.productionsOf[at];
-        const Production* const q = of.size() == 1 ? &_cfg.productions[of.front()] : nullptr;
-        std::uint32_t list = kSeveral;
-        if (q != nullptr && q->rhs.empty() && q->tests.size() == 1 && q->tests.front().ahead.empty() &&
-            q->tests.front().condition == 0 && q->tests.front().gap != Test::Gap::any) {
-          list = and_then(kNone, of);
-        } else if (q != nullptr && !q->rhs.empty() && q->tests.empty() && blank[at]) {
-          list = kNone;
-          for (const Symbol s : q->rhs) {
-            const std::uint32_t read = gaps[index_of(s)];
-            if (read == kUntold) open.push_back(index_of(s));
-            else if (list != kSeveral) list = read == kSeveral ? kSeveral : and_then(list, tested[read]);
+        if (gaps[at] != kUntold && gaps[at] != kOpen) {
+          open.pop_back();
+          continue;
+        }
+        gaps[at] = kOpen;
+        const std::size_t waits = open.size();
+        ways.clear();
+        for (const std::uint32_t p : _cfg.productionsOf[at]) {
+          const Production& q = _cfg.productions[p];
+          std::uint32_t list = kSeveral;
+          if (q.rhs.empty() && q.tests.size() == 1 && q.tests.front().ahead.empty() &&
+              q.tests.front().condition == 0 && q.tests.front().gap != Test::Gap::any) {
+            list = and_then(kNone, std::span(&p, 1));
+          } else if (!q.rhs.empty() && q.tests.empty() &&
+                     std::ranges::all_of(q.rhs, [&](Symbol s) {
+                       return !is_terminal(s) && blank[index_of(s)];
+                     })) {
+            list = kNone;
+            for (const Symbol s : q.rhs) {
+              const std::uint32_t read = gaps[index_of(s)];
+              if (read == kUntold) open.push_back(index_of(s));
+              else if (list != kSeveral) list = read >= kOpen ? kSeveral : and_then(list, tested[read]);
+            }
           }
-          if (open.back() != at) continue;
+          ways.push_back(list);
+        }
+        if (open.size() != waits) continue;
+        std::uint32_t list = ways.size() == 1 ? ways.front() : kSeveral;
+        if (ways.size() > 1 && std::ranges::none_of(ways, [&](std::uint32_t w) { return w == kSeveral; })) {
+          // The copy that ends the operand where none holds negates it whole.
+          const auto read = static_cast<std::uint32_t>(_cfg.productions.size());
+          Production asked;
+          asked.lhs = _cfg.nonterminals++;
+          asked.rule = _cfg.productions[_cfg.productionsOf[at].front()].rule;
+          asked.region = _cfg.productions[_cfg.productionsOf[at].front()].region;
+          asked.rhs = {nonterminal(at)};
+          asked.start = true;
+          _cfg.productions.push_back(std::move(asked));
+          _cfg.productionsOf.emplace_back(1, read);
+          _cfg.conditions.push_back(read);
+          blank.push_back(false);
+          seen.push_back(kNone);
+          entered.push_back(kNone);
+          asks.emplace(read, static_cast<std::uint32_t>(_cfg.conditions.size()));
+          list = and_then(kNone, std::span(&read, 1));
         }
         gaps[at] = list;
         open.pop_back();
@@ -194,7 +230,6 @@ class Lowering {
       return gaps[nt];
     };
     std::vector<Walk> walk;
-    std::vector<std::uint32_t> entered(_cfg.nonterminals, kNone);
     std::map<std::pair<Symbol, std::uint32_t>, Symbol> copies;
     std::map<std::pair<std::uint32_t, Symbol>, std::uint32_t> guards;
     std::ranges::fill(seen, kNone);
@@ -231,6 +266,12 @@ class Lowering {
                   blank.push_back(blank[index_of(s)]);
                   seen.push_back(kNone);
                   entered.push_back(kNone);
+                } else {
+                  // A copy of a bracket or of the line's terminal holds its role too:
+                  // the newest terminal, it ends each list.
+                  for (auto* named : {&_cfg.opens, &_cfg.blocks, &_cfg.closes, &_cfg.lines})
+                    if (std::ranges::binary_search(*named, s))
+                      named->push_back(static_cast<std::uint16_t>(copy->second));
                 }
               }
               mine = copy->second;
@@ -284,8 +325,11 @@ class Lowering {
           Production node = _cfg.productions[table.levels[l].node];
           node.tests.clear();
           for (const std::uint32_t g : tested[guard]) {
-            Test& fails = node.tests.emplace_back(_cfg.productions[g].tests.front());
-            fails.gapUnless = !fails.gapUnless;
+            const auto asked = asks.find(g);
+            Test& fails = node.tests.emplace_back(asked == asks.end() ? _cfg.productions[g].tests.front() : Test{});
+            if (asked != asks.end()) fails.condition = asked->second;
+            if (fails.condition != 0) fails.unless = !fails.unless;
+            else fails.gapUnless = !fails.gapUnless;
           }
           node.copyOf = table.levels[l].node;
           copy->second = static_cast<std::uint32_t>(_cfg.productions.size());
@@ -690,6 +734,8 @@ class Lowering {
   // name the case-insensitive inputs of an ordinary terminal.
   bool words(ImageId id, Terminal& terminal, std::vector<FoldedWord>* folded) const {
     bool exhaustive = true;
+    // A choice several calls reach gives its words once.
+    std::set<ImageId> opened;
     std::vector<ImageId> todo{id};
     while (!todo.empty()) {
       ImageId child = todo.back();
@@ -699,7 +745,8 @@ class Lowering {
       child = _image.bare(child);
       const ImageNode& n = _image.nodes[child];
       if (n.kind == ImageKind::choice) {
-        for (std::uint32_t k = n.count; k-- > 0;) todo.push_back(_image.children[n.first + k]);
+        if (opened.insert(child).second)
+          for (std::uint32_t k = n.count; k-- > 0;) todo.push_back(_image.children[n.first + k]);
         continue;
       }
       if (folded && n.kind == ImageKind::lit && (n.flags & kLitFolded)) {
@@ -1372,6 +1419,7 @@ class Lowering {
       out.reserve(rules.size());
       for (auto rule : rules) out.push_back(twin(terminal_of(_image.rule(*rule)), role));
       std::ranges::sort(out);
+      out.erase(std::ranges::unique(out).begin(), out.end());
     };
     listed(trivia.ignored, Trivia::ignored, region.ignored);
     listed(trivia.hidden, Trivia::hidden, region.hidden);

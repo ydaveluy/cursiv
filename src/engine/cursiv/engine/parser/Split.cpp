@@ -373,8 +373,8 @@ class Election {
     return lex;
   }
 
-  // Readings took different tokens from `place`: elections over text that
-  // holds it compare tokens first.
+  // Readings took different tokens from `place`, counted as the ends of nodes
+  // are: elections over text that holds it compare tokens first.
   void readApart(TextOffset place) {
     const auto at = std::ranges::lower_bound(_apart, place);
     if (at == _apart.end() || *at != place) _apart.insert(at, place);
@@ -526,9 +526,12 @@ class Election {
         continue;
       }
       if (leafA && leafB) {
-        // Tokens that begin apart, or past the last place read apart, are no
-        // choice of the lexer.
-        if (u.begin(text) != v.begin(text) || u.begin(text) > last) return 0;
+        // Tokens that begin apart, or that both readings took past the last
+        // place read apart, are no choice of the lexer.
+        const auto past = [&](std::uint32_t n, Token w) {
+          return stacks.end(n) - static_cast<TextOffset>(w.end - text.src - w.begin(text)) > last;
+        };
+        if (u.begin(text) != v.begin(text) || (past(a, u) && past(b, v))) return 0;
         if (u.end != v.end) return u.end > v.end ? -1 : 1;
         const auto rankU = text.rank(u), rankV = text.rank(v);
         if (rankU != rankV) return rankU < rankV ? -1 : 1;
@@ -877,7 +880,7 @@ void resolve(Machine& text, std::span<const Frame> stack, std::span<const std::u
                 took, [&](Token u) { return u.begin(text) == r.taken.begin(text); });
             if (place == took.end()) took.push_back(r.taken);
             else if (place->head != r.taken.head || place->end != r.taken.end)
-              election.readApart(r.taken.begin(text));
+              election.readApart(r.taken.begin(text) + r.invented);
           }
           next.push_back(r);
         }

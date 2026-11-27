@@ -7,13 +7,23 @@
 
 namespace cursiv::engine::gen {
 
+namespace {
+
+constexpr std::uint64_t kInf = ~std::uint64_t{0};
+std::uint64_t add(std::uint64_t a, std::uint64_t b) { return a > kInf - b ? kInf : a + b; }
+std::uint16_t capped(std::uint64_t n) {
+  return static_cast<std::uint16_t>(std::min<std::uint64_t>(n, KernelCost::kNever));
+}
+using Cost = std::pair<std::uint64_t, std::uint32_t>;
+using Cheapest = std::priority_queue<Cost, std::vector<Cost>, std::greater<>>;
+
+}  // namespace
+
 Closers closers(const Cfg& cfg, const LrAutomaton& automaton) {
   const std::vector<Production>& prods = cfg.productions;
   const std::size_t nterms = cfg.terminals.size();
   const std::size_t nnts = cfg.nonterminals;
   const std::size_t nprods = prods.size();
-  constexpr std::uint64_t kInf = ~std::uint64_t{0};
-  const auto add = [](std::uint64_t a, std::uint64_t b) { return a > kInf - b ? kInf : a + b; };
 
   // The fewest tokens each nonterminal reads. The cheapest one not priced yet
   // gets no cheaper, so a production is read once, when the last nonterminal
@@ -31,8 +41,7 @@ Closers closers(const Cfg& cfg, const LrAutomaton& automaton) {
   const auto yield_of = [&](Symbol s) {
     return is_terminal(s) ? std::uint64_t{1} : yield[index_of(s)];
   };
-  using Cost = std::pair<std::uint64_t, std::uint32_t>;
-  std::priority_queue<Cost, std::vector<Cost>, std::greater<>> cheapest;
+  Cheapest cheapest;
   const auto price = [&](std::uint32_t p) {
     if (prods[p].implied) return;
     std::uint64_t cost = 0;
@@ -172,11 +181,7 @@ Closers closers(const Cfg& cfg, const LrAutomaton& automaton) {
     }
   }
 
-  // Each state's kernel, and the nonterminals each nonterminal's derivations
-  // begin with, cheapest first: the fewest tokens past them complete it.
-  const auto capped = [](std::uint64_t n) {
-    return static_cast<std::uint16_t>(std::min<std::uint64_t>(n, KernelCost::kNever));
-  };
+  // Each state's kernel, and the nonterminals each production begins with.
   for (const auto& state : automaton.states) {
     std::vector<std::uint64_t>& kernel = out.kernels.emplace_back();
     for (const auto& [prod, dot] : state.kernel) {
@@ -186,22 +191,30 @@ Closers closers(const Cfg& cfg, const LrAutomaton& automaton) {
           KernelCost{.lhs = dot == 0 ? KernelCost::kAccept : static_cast<std::uint16_t>(prods[prod].lhs),
                      .symbol = reads ? static_cast<std::uint16_t>(index_of(rhs[dot])) : KernelCost::kNone,
                      .dot = static_cast<std::uint16_t>(dot),
-                     .rest = capped(rest_of(prod, dot)),
-                     .after = capped(dot < rhs.size() ? rest_of(prod, dot + 1) : 0)}
+                     .rest = capped(rest_of(prod, dot))}
               .packed());
     }
   }
-  std::vector<std::vector<std::pair<std::uint32_t, std::uint64_t>>> begins(nnts);
+  for (const std::uint64_t n : yield) out.yields.push_back(capped(n));
+  out.begins.resize(nnts);
   for (std::uint32_t p = 0; p < nprods; ++p)
     if (const auto& rhs = prods[p].rhs; !rhs.empty() && !is_terminal(rhs[0]) && rest_of(p, 1) != kInf)
-      begins[prods[p].lhs].emplace_back(index_of(rhs[0]), rest_of(p, 1));
-  std::vector<std::uint64_t> distance(nnts, kInf);
+      out.begins[prods[p].lhs].emplace_back(index_of(rhs[0]), rest_of(p, 1));
+  return out;
+}
+
+void Closers::corners(const std::vector<bool>& asked, const std::vector<bool>& completed,
+                      std::vector<std::uint32_t>& cornerAt, std::vector<std::uint32_t>& out) const {
+  Cheapest cheapest;
+  std::vector<std::uint64_t> distance(begins.size(), kInf);
   std::vector<std::uint32_t> reached;
-  out.cornerAt.push_back(0);
-  for (std::uint32_t nt = 0; nt < nnts; ++nt) {
-    distance[nt] = 0;
-    reached.push_back(nt);
-    cheapest.emplace(0, nt);
+  cornerAt.push_back(0);
+  for (std::uint32_t nt = 0; nt < begins.size(); ++nt) {
+    if (asked[nt]) {
+      distance[nt] = 0;
+      reached.push_back(nt);
+      cheapest.emplace(0, nt);
+    }
     while (!cheapest.empty()) {
       const auto [cost, at] = cheapest.top();
       cheapest.pop();
@@ -216,13 +229,13 @@ Closers closers(const Cfg& cfg, const LrAutomaton& automaton) {
     }
     std::ranges::sort(reached);
     for (const std::uint32_t corner : reached) {
-      if (corner != nt) out.corners.push_back(corner | std::uint32_t{capped(distance[corner])} << 16);
+      if (corner != nt && completed[corner])
+        out.push_back(corner | std::uint32_t{capped(distance[corner])} << 16);
       distance[corner] = kInf;
     }
     reached.clear();
-    out.cornerAt.push_back(static_cast<std::uint32_t>(out.corners.size()));
+    cornerAt.push_back(static_cast<std::uint32_t>(out.size()));
   }
-  return out;
 }
 
 }  // namespace cursiv::engine::gen
