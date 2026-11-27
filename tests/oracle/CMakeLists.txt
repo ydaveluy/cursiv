@@ -61,7 +61,7 @@ endfunction()
 
 # One accepted seed per family, plus a scoped end behind nullable rules (6946)
 # and a guarded left recursion whose condition starts with a reduction (9176).
-set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176)
+set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176 27043192)
 foreach(seed IN LISTS _rgram_fixed)
   cursiv_rgram(${seed})
   add_test(NAME rgram_${seed} COMMAND rgram${seed}_check)

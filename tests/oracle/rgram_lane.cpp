@@ -14,6 +14,7 @@
 #include <unistd.h>
 #endif
 
+#include "cursiv/CstInvariants.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/syntax-tree/AstReflection.hpp"
 #include "cursiv/syntax-tree/ParseDiagnostic.hpp"
@@ -154,6 +155,11 @@ int rgram_lane(unsigned seed, const Parser& parser, const AstReflection& reflect
       }
     }
     watch(0);
+    const auto cst = fuzzer::detail::CstInvariants{}.run(r.cst(), d.text);
+    if (!cst.ok) {
+      ++bad;
+      std::printf("rgram %u: document %zu: CST record %u: %s\n", seed, i, cst.at, cst.why.c_str());
+    }
     const bool clean = r.accepted && r.diagnostics.empty();
     if (clean != o.accepted || (clean && r.value == nullptr)) {
       ++bad;

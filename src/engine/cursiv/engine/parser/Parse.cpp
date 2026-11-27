@@ -70,16 +70,23 @@ void Machine::place_prefixes() {
   };
   for (const auto& moved : prefixes->recalls) {
     append(moved.from);
-    const auto end = at + moved.count;
     const auto last = tail;
+    const auto following = moved.open < at ? tape.at(first[moved.open]).begin
+                                           : static_cast<TextOffset>(end - src);
     if (moved.open < at) tail = prev[first[moved.open]];
+    const auto preceding = tail == kNoNode ? TextOffset{0} : tape.at(tail).end;
     for (NodeCount i = 0; i < moved.count; ++i) {
       auto& node = tape.at(at + i);
       const auto& original = prefixes->records[moved.source + i];
-      node.begin = original.begin;
-      node.end = original.end;
+      if (original.begin == original.end) {
+        // Lookahead can place an empty prefix beyond its operand's first empty child.
+        node.begin = node.end = std::clamp(original.begin, preceding, following);
+      } else {
+        node.begin = original.begin;
+        node.end = original.end;
+      }
     }
-    append(end);
+    append(at + moved.count);
     if (moved.open < moved.from) {
       prev[first[moved.open]] = tail;
       first[moved.open] = moved.from;
