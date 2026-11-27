@@ -2,16 +2,21 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include "block/generated/Block/Module.hpp"
 #include "caret/generated/Caret/Module.hpp"
+#include "cursiv/engine/completion/Caret.hpp"
+#include "cursiv/engine/parser/Explorer.hpp"
 #include "cursiv/grammar/NextFeature.hpp"
 #include "cursiv/parser/Parser.hpp"
 #include "cursiv/references/DefaultScopeProvider.hpp"
@@ -28,6 +33,8 @@
 #include "support/Editor.hpp"
 #include "support/WorkspaceWorld.hpp"
 #include "wordslr/generated/Suite/Module.hpp"
+#include "wordslr/generated/Suite/Table.hpp"
+#include "wordscycle/generated/Cyclic/Module.hpp"
 
 namespace default_completion_provider {
 
@@ -696,11 +703,179 @@ void a_token_that_reads_on_into_the_spelling_ends_the_search() {
   CHECK(fastest(*parser, "chain:y", 7) < 50 * fastest(*parser, "chain: ", 7));
 }
 
-// A count read only at the end of the text ends no spelling that text follows:
-// sixteen times more counts cost about sixteen times more, not their square.
-void a_count_read_at_the_end_is_not_spelled_before_more_text() {
+// EOF counts reject an incompatible suffix or one that fills the count.
+// Sixteen times more DFA states must not square the completion work.
+void eof_counts_share_their_suffix_search() {
   const auto parser = twords::generated::Suite::createParser();
   CHECK(fastest(*parser, "last:  ;", 6) < 64 * fastest(*parser, "few:  ;", 5));
+  CHECK(fastest(*parser, "last:" + std::string(1024, 'w'), 5) <
+        32 * fastest(*parser, "few:" + std::string(64, 'w'), 4));
+  CHECK(fastest(*parser, "mixedlast:" + std::string(1024, 'w'), 10) <
+        64 * fastest(*parser, "mixedfew:" + std::string(64, 'w'), 9));
+}
+
+void an_eof_completion_keeps_a_nonempty_return_to_the_start() {
+  const auto parser = twords::generated::Cyclic::createParser();
+  for (const std::string_view text : {"y", "wxy"}) {
+    const auto parsed = parser->parse(text);
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+    std::vector<cursiv::NextFeature> features;
+    parser->nextFeaturesAt(parsed.cst(), 0, 0, features);
+    CHECK(std::ranges::any_of(features, [&](const auto& feature) {
+      return parser->getGrammar().terminalName(feature.feature) == "WORD" &&
+             feature.property == "name";
+    }));
+  }
+}
+
+void an_eof_guard_reads_the_retained_suffix() {
+  const auto parser = twords::generated::Suite::createParser();
+  const auto offered = [&](std::string_view text, cursiv::TextOffset at,
+                           cursiv::TextOffset resume,
+                           std::string_view terminal) {
+    const auto parsed = parser->parse(text);
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+    std::vector<cursiv::NextFeature> features;
+    parser->nextFeaturesAt(parsed.cst(), at, resume, features);
+    return std::ranges::any_of(features, [&](const auto& feature) {
+      return parser->getGrammar().terminalName(feature.feature) == terminal;
+    });
+  };
+  CHECK(offered("guardend:#;", 9, 10, "END_GUARD"));
+  CHECK(offered("guardend:w;", 9, 10, "END_GUARD"));
+  CHECK(offered("guardend:ww;", 9, 10, "END_GUARD"));
+  CHECK(offered("guardend:ww;", 9, 9, "END_GUARD"));
+  CHECK(offered("guardpairs:#;;", 11, 12, "END_PAIRS"));
+  CHECK(offered("guardpairs:wxwx;;", 11, 12, "END_PAIRS"));
+  CHECK(offered("guardpairs:wxwx;;", 11, 11, "END_PAIRS"));
+  CHECK(!offered("guardpairs:wx;;", 11, 14, "END_PAIRS"));
+  CHECK(offered("guardutf8:#→", 10, 11, "END_UTF8"));
+  CHECK(offered("guardutf8:éé→", 10, 11, "END_UTF8"));
+  CHECK(offered("guardutf8:éé→", 10, 10, "END_UTF8"));
+  CHECK(!offered("guardutf8:#→", 10, 13, "END_UTF8"));
+  CHECK(offered("guardelect:\n#;;", 12, 13, "END_OTHER"));
+  CHECK(offered("guardelect:\nwx;;", 12, 13, "END_OTHER"));
+  CHECK(offered("guardelect:\nwx;;", 12, 14, "END_OTHER"));
+  CHECK(offered("guardelect:\nwx;;", 12, 12, "END_OTHER"));
+  CHECK(!offered("guardelect:\nwx;;", 12, 13, "END_PAIRS"));
+  CHECK(!offered("guardelect: #;;", 12, 13, "END_OTHER"));
+  CHECK(!offered("guardelect: #;;", 12, 13, "END_PAIRS"));
+  CHECK(offered("last:ww", 5, 6, "LAST"));
+  CHECK(offered("last:ww", 5, 5, "LAST"));
+  CHECK(!offered("last:;", 5, 5, "LAST"));
+  CHECK(offered("mixedlast:xw", 10, 11, "LAST_MIXED"));
+  CHECK(offered("mixedfew:wx", 9, 9, "FEW_MIXED"));
+  CHECK(!offered("mixedfew:;", 9, 9, "FEW_MIXED"));
+  for (const auto& [prefix, terminal, size] :
+       {std::tuple<std::string_view, std::string_view, unsigned>{"few:", "FEW",
+                                                                64},
+         {"last:", "LAST", 1024},
+         {"mixedfew:", "FEW_MIXED", 64},
+         {"mixedlast:", "LAST_MIXED", 1024}}) {
+    const std::string text = std::string(prefix) + std::string(size, 'w');
+    const auto at = static_cast<cursiv::TextOffset>(prefix.size());
+    CHECK(!offered(text, at, at, terminal));
+    CHECK(offered(text, at, at + 1, terminal));
+  }
+}
+
+cursiv::engine::Exit (*unguardedExplore)(cursiv::engine::Explorer&);
+std::uint16_t guardedTerminal = 0;
+std::size_t acceptedLength = 0;
+std::map<std::size_t, unsigned> testedLengths;
+
+bool accepts_length(cursiv::engine::Machine& m, const char*, const char*,
+                    cursiv::engine::Token tok, cursiv::engine::Indented) {
+  const auto length = static_cast<std::size_t>(tok.end - m.src - tok.begin(m));
+  ++testedLengths[length];
+  return length == acceptedLength;
+}
+
+cursiv::engine::Exit with_length_guard(cursiv::engine::Explorer& x) {
+  auto& m = x.text;
+  if (m.ended == guardedTerminal && x.tok.terminal() == guardedTerminal &&
+      x.tok.end == m.end && !m.check(accepts_length, x.at, x.at, x.tok, x.indented))
+    return x.refused(x.tok);
+  return unguardedExplore(x);
+}
+
+// A pending predicate can reject every spelling, or accept only the longest.
+// Equal spellings from the two byte preferences ask it only once.
+void eof_spellings_share_validation_without_losing_longer_candidates() {
+  namespace g = twords::generated::Suite;
+  const auto parser = g::createParser();
+  auto tables = g::kTables;
+  unguardedExplore = tables.explore;
+  tables.explore = with_length_guard;
+  const cursiv::engine::Language language{tables, g::kAst, g::kGrammar};
+  for (const auto& [prefix, terminal, size] :
+       {std::tuple<std::string_view, std::string_view, unsigned>{"few:", "FEW", 64},
+        {"last:", "LAST", 1024}}) {
+    for (std::uint16_t t = 0; t < tables.terminalCount; ++t)
+      if (parser->getGrammar().terminalName(t) == terminal) guardedTerminal = t;
+    const std::string text = std::string(prefix) + std::string(size / 2, 'w');
+    const auto parsed = parser->parse(text);
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+    for (const auto length : {0u, size}) {
+      acceptedLength = length;
+      testedLengths.clear();
+      std::vector<cursiv::NextFeature> features;
+      const auto at = static_cast<cursiv::TextOffset>(prefix.size());
+      cursiv::engine::next_features(language, parsed.cst(), at, at, features,
+                                   cursiv::kNoCancel);
+      CHECK(std::ranges::any_of(features, [](const auto& feature) {
+        return feature.feature == guardedTerminal;
+      }) == (length != 0));
+      CHECK(testedLengths.size() == size / 2);
+      for (const auto& [span, count] : testedLengths) {
+        CHECK(span > size / 2 && span <= size);
+        CHECK(count == 1);
+      }
+    }
+  }
+}
+
+const cursiv::engine::RunScanner* originalScanners = nullptr;
+const std::uint8_t* scannerSets = nullptr;
+std::uint64_t scannedBytes = 0;
+
+const char* counted_scan(const std::uint8_t* in, const char* from,
+                         const char* end) {
+  const auto next = originalScanners[(in - scannerSets) / 256](in, from, end);
+  scannedBytes += static_cast<std::uint64_t>(next - from);
+  return next;
+}
+
+void held_tokens_share_their_lexical_suffixes() {
+  namespace g = twords::generated::Suite;
+  const auto parser = g::createParser();
+  auto tables = g::kTables;
+  originalScanners = tables.runScanners;
+  scannerSets = tables.runSets;
+  std::vector<cursiv::engine::RunScanner> scanners;
+  for (auto scan = originalScanners; *scan; ++scan)
+    scanners.push_back(counted_scan);
+  scanners.push_back(nullptr);
+  tables.runScanners = scanners.data();
+  const cursiv::engine::Language language{tables, g::kAst, g::kGrammar};
+  const auto count = [&](unsigned size) {
+    const std::string text = "crossing:" + std::string(size, 'a') + "x";
+    const auto parsed = parser->parse(text);
+    CHECK(parsed.accepted && parsed.diagnostics.empty());
+    std::vector<cursiv::NextFeature> features;
+    scannedBytes = 0;
+    const auto at = static_cast<cursiv::TextOffset>(text.size() - 1);
+    cursiv::engine::next_features(language, parsed.cst(), at, at + 1, features,
+                                  cursiv::kNoCancel);
+    CHECK(std::ranges::any_of(features, [](const auto& feature) {
+      return feature.property == "name";
+    }));
+    return scannedBytes;
+  };
+  const auto small = count(256);
+  const auto large = count(512);
+  CHECK(large < 3 * small);
+  CHECK(large < 256 * 512);
 }
 
 // A literal `a` read only before `;c` turns the name before the caret into it:
@@ -797,7 +972,11 @@ void run() {
   a_condition_may_ask_for_a_longer_spelling();
   a_candidate_keeps_the_trivia_before_it();
   a_token_that_reads_on_into_the_spelling_ends_the_search();
-  a_count_read_at_the_end_is_not_spelled_before_more_text();
+  eof_counts_share_their_suffix_search();
+  an_eof_completion_keeps_a_nonempty_return_to_the_start();
+  an_eof_guard_reads_the_retained_suffix();
+  eof_spellings_share_validation_without_losing_longer_candidates();
+  held_tokens_share_their_lexical_suffixes();
   a_guard_before_the_caret_is_read_again_with_the_candidate();
   a_member_hides_an_inherited_one_of_its_name();
   the_replaced_token_is_a_spelling_only_over_its_whole_span();

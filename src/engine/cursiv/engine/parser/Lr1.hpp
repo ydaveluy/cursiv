@@ -62,11 +62,6 @@ void split_leads(Cfg& cfg);
 // `Test::shadows`. `reads` as `lex_rivals` gives it.
 void shadow_tests(Cfg& cfg, const std::vector<RivalRow>& reads);
 
-// A test that only refuses tokens, none of which the symbols after it begin
-// with, leaves the productions that use it as `Production::bars`: what comes
-// after it is then read alike with it and without it.
-void bar_tests(Cfg& cfg);
-
 // The tokens that may read the text of a trivia passed under `scopes`, a bit
 // a scope.
 Bits trivia_shadows(const Cfg& cfg, std::uint64_t scopes);
@@ -76,9 +71,10 @@ Bits trivia_shadows(const Cfg& cfg, std::uint64_t scopes);
 // for. A node that reads nothing waits for the token, to stand where it begins.
 std::uint32_t reduced_alone(const Cfg& cfg, const LrState& state);
 
-// `takes` as `lex_rivals` gives it; `always`: the trivia every state reads.
-// A nonzero `maxStates` bounds refinement to the hottest cells.
-LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const Bits& always,
+// Normalizes guarded prefixes, recursive omissions and token bars before building.
+// `takes` comes from `lex_rivals`; `always` names the trivia every state reads.
+// Rebuilding is stable; nonzero `maxStates` limits refinement to the hottest cells.
+LrAutomaton build_lr1(Cfg& cfg, const std::vector<RivalRow>& takes, const Bits& always,
                       std::uint32_t maxStates = 0);
 
 }  // namespace cursiv::engine::gen

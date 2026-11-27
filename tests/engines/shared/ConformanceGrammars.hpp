@@ -64,6 +64,11 @@ struct Expression : cursiv::Extends<cursiv::AstNode> {};
 struct Name : cursiv::Extends<Expression> {
   string_view name;
 };
+struct Binary : cursiv::Extends<Expression> {
+  Expression* left = nullptr;
+  string_view op;
+  Expression* right = nullptr;
+};
 struct Call : cursiv::Extends<Expression> {
   Expression* callee = nullptr;
   Expression* argument = nullptr;
@@ -955,6 +960,45 @@ struct Behind : cursiv::GrammarSpec {
   using ignored = WS;
 };
 
+struct ImpliedPrefix : cursiv::GrammarSpec {
+  struct WS : terminal<some(s)> {};
+  struct Guarded : rule<(gap::line + lit<"a">) | (implied(lit<";">, gap::none) +
+                                                  ref<Guarded> + lit<"b">)> {};
+  struct Plain : rule<lit<"a"> |
+                      (implied(lit<";">, gap::none) + ref<Plain> + lit<"b">)> {
+  };
+  struct Blank : rule<option(lit<"q">) |
+                      (implied(lit<";">, gap::none) + ref<Blank> + lit<"b">)> {
+  };
+  struct Indirect;
+  struct Middle : rule<(gap::none + ref<Indirect> + lit<"c">) | lit<"a">> {};
+  struct Indirect
+      : rule<implied(lit<";">, gap::none) + ref<Middle> + lit<"b">> {};
+  struct Root : rule<create<ast::Doc>(ref<Guarded>)> {};
+  struct Direct : rule<create<ast::Doc>(ref<Plain>)> {};
+  struct Nullable : rule<create<ast::Doc>(ref<Blank>)> {};
+  struct Priority : rule<create<ast::Doc>((ref<Blank> + lit<"z">) |
+                                          (lit<"b"> + lit<"x">))> {};
+  struct ReducedPriority
+      : rule<create<ast::Doc>((ref<Blank> + lit<"z">) |
+                              (gap::none + lit<"b"> + lit<"x">))> {};
+  struct Repeated : rule<create<ast::Doc>(ref<Indirect>)> {};
+  struct Primary
+      : rule<create<ast::Name>(assign<&ast::Name::name>(lit<"x">)) |
+             (implied(lit<";">, gap::none) + ref<Primary> + lit<"b">)> {};
+  struct Expression : infix<Primary, ast::Binary,
+                            levels(right(lit<"^">), left(lit<"*">),
+                                   left(lit<"+">), nonassoc(lit<"<">))> {};
+  struct Continuation
+      : rule<create<ast::Program>(
+            repeat<8>(lit<"c">) +
+            append<&ast::Program::statements>(ref<Expression>) + lit<"!">)> {};
+  struct Shared : rule<(lit<"p"> + ref<Continuation> + lit<"q">) |
+                       (lit<"r"> + ref<Continuation> + lit<"s">)> {};
+  using entry = Root;
+  using ignored = WS;
+};
+
 // Each suffix of a chain is the operand's or the loop's, to the end of the
 // text.
 struct Chain : cursiv::GrammarSpec {
@@ -1180,6 +1224,14 @@ struct Suite : cursiv::GrammarSpec {
              (lit<"levels:"> + ref<Levels::Root>) |
              (lit<"behind:"> + ref<Behind::Root>) |
              (lit<"blankprefix:"> + ref<Behind::Guarded>) |
+             (lit<"impliedprefix:"> + ref<ImpliedPrefix::Root>) |
+             (lit<"implieddirect:"> + ref<ImpliedPrefix::Direct>) |
+             (lit<"impliednullable:"> + ref<ImpliedPrefix::Nullable>) |
+             (lit<"impliedpriority:"> + ref<ImpliedPrefix::Priority>) |
+             (lit<"impliedreduce:"> + ref<ImpliedPrefix::ReducedPriority>) |
+             (lit<"impliedrepeated:"> + ref<ImpliedPrefix::Repeated>) |
+             (lit<"impliedexpression:"> + ref<ImpliedPrefix::Expression>) |
+             (lit<"impliedshared:"> + ref<ImpliedPrefix::Shared>) |
              (lit<"chain:"> + ref<Chain::Root>) |
              (lit<"unboundedname:"> + ref<UnboundedName::Root>) |
              (lit<"keywordtrivia:"> + skip(ignore<KeywordTrivia::WS>,

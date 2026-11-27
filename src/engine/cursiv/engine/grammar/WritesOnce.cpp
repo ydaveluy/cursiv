@@ -1,5 +1,6 @@
 #include "cursiv/engine/grammar/WritesOnce.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <map>
 #include <memory>
@@ -8,7 +9,6 @@
 #include <vector>
 
 #include "cursiv/engine/grammar/Refused.hpp"
-#include "cursiv/grammar/expr.hpp"
 #include "cursiv/utils/Descent.hpp"
 
 namespace cursiv::engine::gen {

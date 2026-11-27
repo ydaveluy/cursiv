@@ -1,6 +1,4 @@
 #include "cursiv/engine/parser/Lr1.hpp"
-#include "cursiv/engine/grammar/StatePartition.hpp"
-#include "cursiv/engine/grammar/StrongComponents.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -8,11 +6,26 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <queue>
 #include <ranges>
 #include <span>
 #include <unordered_map>
 
+#include "cursiv/engine/grammar/StatePartition.hpp"
+#include "cursiv/engine/grammar/StrongComponents.hpp"
+
 namespace cursiv::engine::gen {
+
+// One-action conditions preserve the alphabet and actions of their LR context.
+struct TurnContexts {
+  // A specialized infix node, gate or guarded copy, and its original.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> infixCopies;
+  // Initial condition states, ordered by the production in their kernel.
+  std::vector<LrState> readers;
+
+  TurnContexts(Cfg& cfg, const LrAutomaton& lr,
+               std::span<const std::uint32_t> guarded);
+};
 
 namespace {
 
@@ -36,6 +49,13 @@ struct Items {
     nullable = blanks.empty() ? cfg.nullable() : std::move(blanks);
     open.assign(nnts, false);
     first.assign(nnts, Bits(nterms));
+    if (cfg.turnContexts)
+      for (const auto& reader : cfg.turnContexts->readers) {
+        auto& alphabet = first[cfg.productions[reader.kernel.front().first].lhs];
+        for (const auto& [p, on] : reader.reduces) alphabet.merge(on);
+        for (const auto* row : {&reader.named, &reader.follow})
+          for (const auto t : *row) alphabet.set(t);
+      }
     // A production is read again only when a nonterminal it may begin with
     // changed.
     std::vector<std::vector<std::uint32_t>> leads(nnts);
@@ -574,37 +594,69 @@ struct Relation {
   }
 };
 
-// Spreads the sets along `r` to a fixpoint: each number a node gains crosses
-// each of its edges once.
+// Settle each component before passing its sets on. Converged paths cross
+// downstream edges once, even when their facts arrive separately.
 void spread(const Relation& r, std::vector<Bits>& sets) {
-  std::vector<Bits> gained = sets;
+  std::vector<std::uint32_t> component(sets.size()), members, starts{0};
+  strong_components(r.first, r.to, [&](auto part) {
+    for (const auto x : part)
+      component[x] = static_cast<std::uint32_t>(starts.size() - 1);
+    members.insert(members.end(), part.begin(), part.end());
+    starts.push_back(static_cast<std::uint32_t>(members.size()));
+  });
+  std::vector<Bits> gained(sets.size());
   std::vector<std::uint32_t> work;
   std::vector<bool> queued(sets.size(), false);
-  for (std::uint32_t x = 0; x < sets.size(); ++x)
-    if (gained[x].any()) {
-      queued[x] = true;
-      work.push_back(x);
-    }
   Bits delta, add;
-  while (!work.empty()) {
-    const std::uint32_t x = work.back();
-    work.pop_back();
-    queued[x] = false;
-    delta = gained[x];
-    gained[x].clear();
-    for (std::uint32_t e = r.first[x]; e < r.first[x + 1]; ++e) {
-      const std::uint32_t y = r.to[e];
-      add = delta;
-      if (r.filter[e] != nullptr) add.remove(*r.filter[e]);
-      add.remove(sets[y]);
-      if (!add.any()) continue;
-      sets[y].merge(add);
-      gained[y].merge(add);
-      if (!queued[y]) {
-        queued[y] = true;
-        work.push_back(y);
+  for (std::size_t c = starts.size() - 1; c-- > 0;) {
+    const auto part = std::span(members).subspan(starts[c], starts[c + 1] - starts[c]);
+    const bool filtered = std::ranges::any_of(part, [&](auto x) {
+      for (auto e = r.first[x]; e < r.first[x + 1]; ++e)
+        if (component[r.to[e]] == c && r.filter[e] != nullptr && r.filter[e]->any()) return true;
+      return false;
+    });
+    if (!filtered) {
+      delta = sets[part.front()];
+      for (const auto x : part.subspan(1)) delta.merge(sets[x]);
+      for (const auto x : part) sets[x] = delta;
+    } else {
+      for (const auto x : part) {
+        gained[x] = sets[x];
+        if (sets[x].any()) {
+          queued[x] = true;
+          work.push_back(x);
+        }
+      }
+      while (!work.empty()) {
+        const auto x = work.back();
+        work.pop_back();
+        queued[x] = false;
+        delta = gained[x];
+        gained[x].clear();
+        for (auto e = r.first[x]; e < r.first[x + 1]; ++e) {
+          const auto y = r.to[e];
+          if (component[y] != c) continue;
+          add = delta;
+          if (r.filter[e] != nullptr) add.remove(*r.filter[e]);
+          add.remove(sets[y]);
+          if (!add.any()) continue;
+          sets[y].merge(add);
+          gained[y].merge(add);
+          if (!queued[y]) {
+            queued[y] = true;
+            work.push_back(y);
+          }
+        }
       }
     }
+    for (const auto x : part)
+      for (auto e = r.first[x]; e < r.first[x + 1]; ++e) {
+        const auto y = r.to[e];
+        if (component[y] == c) continue;
+        add = sets[x];
+        if (r.filter[e] != nullptr) add.remove(*r.filter[e]);
+        sets[y].merge(add);
+      }
   }
 }
 
@@ -766,6 +818,14 @@ std::optional<Graph> split(const std::vector<Core>& cores, const Nodes& perCore,
 LrState facts(const Items& it, Closure& closure, std::span<const Position> kernel,
               std::span<const Bits> lookahead) {
   const Cfg& cfg = it.cfg;
+  if (cfg.turnContexts && kernel.size() == 1 &&
+      it.dot[kernel.front().item] == 0) {
+    const auto root = it.prod[kernel.front().item];
+    const auto& readers = cfg.turnContexts->readers;
+    const auto gate = std::ranges::lower_bound(
+        readers, root, {}, [](const LrState& s) { return s.kernel.front().first; });
+    if (gate != readers.end() && gate->kernel.front().first == root) return *gate;
+  }
   LrState state;
   state.scopes = 0;
   std::map<std::uint16_t, std::uint64_t> governs;
@@ -849,31 +909,59 @@ LrState facts(const Items& it, Closure& closure, std::span<const Position> kerne
 void settle_infix(const Items& it, std::vector<LrState>& states) {
   const Cfg& cfg = it.cfg;
   if (cfg.infixes.empty()) return;
-  // Per production that builds a node: its table and its level.
-  std::vector<std::pair<std::uint32_t, std::uint32_t>> node(cfg.productions.size(), {kNone, kNone});
+  // Per infix node or operator gate: its table, level and role.
+  struct Place {
+    std::uint32_t table = kNone, level = kNone;
+    bool gate = false;
+    std::span<const std::pair<std::uint16_t, std::uint32_t>> past{};
+  };
+  std::vector<Place> places(cfg.productions.size());
   // Per table, the terminals that begin binary or postfix operators, each
   // with the level of those operators; ascending.
   std::vector<std::vector<std::pair<std::uint16_t, std::uint32_t>>> opens(cfg.infixes.size());
   for (std::uint32_t x = 0; x < cfg.infixes.size(); ++x) {
     const Infix& table = cfg.infixes[x];
     for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
-      node[table.levels[l].node] = {x, l};
+      places[table.levels[l].node] = {x, l, false, table.levels[l].past};
       if (table.levels[l].group == Association::Prefix) continue;
+      for (const auto p : cfg.productionsOf[table.levels[l].operators])
+        if (cfg.productions[p].rhs.empty()) places[p] = {x, l, true};
       it.first[table.levels[l].operators].each(
           [&](std::size_t t) { opens[x].emplace_back(static_cast<std::uint16_t>(t), l); });
     }
     std::ranges::sort(opens[x]);
   }
+  std::map<std::uint32_t, std::vector<std::pair<std::uint16_t, std::uint32_t>>> copiedPast;
+  if (cfg.turnContexts) {
+    std::map<std::uint32_t, std::vector<std::uint16_t>> on;
+    for (const auto& table : cfg.infixes)
+      for (const auto& level : table.levels)
+        for (const auto [t, p] : level.past) on[p].push_back(t);
+    for (const auto [p, original] : cfg.turnContexts->infixCopies) {
+      places[p] = places[original];
+      places[p].past = {};
+      if (const auto from = on.find(original); from != on.end()) {
+        for (const auto t : from->second)
+          copiedPast[cfg.productions[p].copyOf].emplace_back(t, p);
+      }
+    }
+    for (auto& [p, row] : copiedPast) {
+      std::ranges::sort(row);
+      places[p].past = row;
+    }
+  }
   // The terminals on which a state does not begin the operator that comes;
   // the copies of nodes it reduces where the operator's gap test fails.
   Bits unread(it.nterms);
+  std::map<std::pair<std::uint32_t, std::uint16_t>, std::uint32_t> limits;
   std::vector<std::tuple<std::uint32_t, std::uint16_t, std::uint32_t>> past;
   for (LrState& state : states) {
     bool emptied = false;
     past.clear();
+    limits.clear();
     for (auto& [prod, on] : state.reduces) {
-      const auto [x, l] = node[prod];
-      if (x == kNone) continue;
+      const auto [x, l, gate, copies] = places[prod];
+      if (x == kNone || gate) continue;
       const Infix::Level& level = cfg.infixes[x].levels[l];
       unread.clear();
       // Where the token begins operators of several levels, a reading
@@ -882,13 +970,22 @@ void settle_infix(const Items& it, std::vector<LrState>& states) {
         const auto [from, to] = std::ranges::equal_range(
             opens[x], static_cast<std::uint16_t>(t), {}, [](const auto& o) { return o.first; });
         if (from == to) return;
+        if (cfg.terminals[t].body == kNoImage &&
+            level.group != Association::Postfix) {
+          const auto limit = l + cfg.infixes[x].order(l, std::span(&l, 1)).second;
+          const auto [at, fresh] = limits.try_emplace(
+              std::pair(x, static_cast<std::uint16_t>(t)), limit);
+          if (!fresh) at->second = std::min(at->second, limit);
+        }
         const auto [before, coming] =
             cfg.infixes[x].order(l, std::ranges::subrange(from, to) | std::views::values);
-        if (!before) {
+        const auto copy = std::ranges::lower_bound(
+            copies, static_cast<std::uint16_t>(t), {},
+            [](const auto& c) { return c.first; });
+        const bool guarded = copy != copies.end() && copy->first == t;
+        if (!before || (guarded && cfg.terminals[t].body == kNoImage)) {
           on.reset(t);
-          const auto copy = std::ranges::lower_bound(level.past, static_cast<std::uint16_t>(t), {},
-                                                     [](const auto& c) { return c.first; });
-          if (copy != level.past.end() && copy->first == t)
+          if (guarded)
             past.emplace_back(copy->second, static_cast<std::uint16_t>(t), prod);
         }
         if (!coming) unread.set(t);
@@ -906,6 +1003,16 @@ void settle_infix(const Items& it, std::vector<LrState>& states) {
           with.remove(unread);
           emptied = emptied || !with.any();
         }
+    }
+    // A virtual token's gates retain the precedence of their individual levels.
+    for (auto& [prod, on] : state.reduces) {
+      const auto [x, l, gate, copies] = places[prod];
+      if (x == kNone || !gate) continue;
+      on.each([&](std::size_t t) {
+        const auto limit = limits.find({x, static_cast<std::uint16_t>(t)});
+        if (limit != limits.end() && l >= limit->second) on.reset(t);
+      });
+      emptied = emptied || !on.any();
     }
     if (emptied)
       std::erase_if(state.reduces, [](const auto& reduce) { return !reduce.second.any(); });
@@ -1256,15 +1363,16 @@ static bool atomic_test(const Production& q) {
   return q.rhs.empty() && q.tests.size() == 1 && !q.implied && !q.start && q.entry == kNone;
 }
 
-// Each entry to a guarded left recursion leaves its conditions on the stack.
-// Its turns consult those markers before accepting a suffix.
-static void guard_turns(Cfg& cfg) {
+// Each entry leaves its prefix conditions on the stack for its turns to
+// consult. Implied prefixes are returned for context specialization first.
+static std::vector<std::uint32_t> guard_turns(Cfg& cfg) {
   const std::size_t n = cfg.productions.size();
   std::vector<std::uint32_t> prefix(n);
   // A choice or sequence of conditions still reads no input. A transparent
   // unary rule uses the same marker as its child.
   std::vector<Symbol> guard(cfg.nonterminals, kNone);
-  std::vector<bool> writes(cfg.nonterminals), tested(cfg.nonterminals);
+  std::vector<bool> writes(cfg.nonterminals), tested(cfg.nonterminals),
+      fallback(cfg.nonterminals);
   std::vector<std::uint32_t> pending(cfg.nonterminals);
   std::vector<std::vector<std::uint32_t>> parents(cfg.nonterminals);
   std::vector<std::uint32_t> work;
@@ -1273,7 +1381,8 @@ static void guard_turns(Cfg& cfg) {
       const auto& q = cfg.productions[p];
       writes[nt] = writes[nt] || q.entry != kNone;
       tested[nt] = tested[nt] || q.tested();
-      if (q.start || q.implied || std::ranges::any_of(q.rhs, is_terminal)) {
+      fallback[nt] = fallback[nt] || q.implied;
+      if (q.start || std::ranges::any_of(q.rhs, is_terminal)) {
         pending[nt] = kNone;
         break;
       }
@@ -1297,6 +1406,7 @@ static void guard_turns(Cfg& cfg) {
     for (const auto parent : parents[nt]) {
       tested[parent] = tested[parent] || tested[nt];
       writes[parent] = writes[parent] || writes[nt];
+      fallback[parent] = fallback[parent] || fallback[nt];
       if (pending[parent] != kNone && --pending[parent] == 0) work.push_back(parent);
     }
   }
@@ -1307,7 +1417,7 @@ static void guard_turns(Cfg& cfg) {
     while (at < rhs.size() && !is_terminal(rhs[at]) && guard[index_of(rhs[at])] != kNone) ++at;
     needed |= at != 0 && at < rhs.size() && !is_terminal(rhs[at]);
   }
-  if (!needed) return;
+  if (!needed) return {};
   const auto group = left_components(cfg, prefix);
   struct Mark {
     Symbol symbol;
@@ -1320,6 +1430,7 @@ static void guard_turns(Cfg& cfg) {
   };
   std::map<std::uint32_t, std::map<Mark, std::uint32_t>> marks;
   std::vector<bool> turn(n);
+  std::vector<std::uint32_t> deferred;
   for (std::uint32_t p = 0; p < n; ++p) {
     const auto& q = cfg.productions[p];
     const auto at = prefix[p];
@@ -1327,9 +1438,11 @@ static void guard_turns(Cfg& cfg) {
     turn[p] = true;
     for (std::uint32_t i = 0; i < at; ++i) {
       const auto nt = index_of(q.rhs[i]);
+      if (fallback[nt]) deferred.push_back(nt);
       if (tested[nt] || writes[nt]) marks[group[q.lhs]].try_emplace(mark_at(q, i), 0);
     }
   }
+  if (!deferred.empty()) return deferred;
   std::map<Mark, std::pair<Symbol, Symbol>> answers;
   for (auto& [component, tests] : marks) {
     auto depth = static_cast<std::uint32_t>(tests.size());
@@ -1426,19 +1539,20 @@ static void guard_turns(Cfg& cfg) {
   }
   cfg.productionsOf.resize(cfg.nonterminals);
   for (std::uint32_t p = n; p < cfg.productions.size(); ++p) cfg.productionsOf[cfg.productions[p].lhs].push_back(p);
+  return {};
 }
 
-void bar_tests(Cfg& cfg) {
-  const auto original = cfg.productions.size();
-  const auto originalNts = cfg.nonterminals;
-  guard_turns(cfg);
-  if (std::ranges::none_of(cfg.productions, atomic_test)) return;
+// Token-only refusals become item bars except where their stack slots belong
+// to an opening, whether that opening's conditions held or failed.
+static std::vector<std::uint32_t> bar_tests(Cfg& cfg) {
+  if (auto deferred = guard_turns(cfg); !deferred.empty()) return deferred;
+  if (std::ranges::none_of(cfg.productions, atomic_test)) return {};
   std::vector<const Test*> refuses(cfg.nonterminals, nullptr);
   const auto ends_scope = [&](std::uint16_t t) {
     return t != kEndOfInput &&
            std::ranges::any_of(cfg.regions, [&](const Region& r) { return r.end == t; });
   };
-  for (std::uint32_t nt = 0; nt < originalNts; ++nt) {
+  for (std::uint32_t nt = 0; nt < cfg.nonterminals; ++nt) {
     const auto& ways = cfg.productionsOf[nt];
     if (ways.size() != 1) continue;
     const auto& q = cfg.productions[ways.front()];
@@ -1449,29 +1563,72 @@ void bar_tests(Cfg& cfg) {
         std::ranges::none_of(test.ahead, ends_scope))
       refuses[nt] = &test;
   }
-  if (std::ranges::none_of(refuses, [](const Test* test) { return test != nullptr; })) return;
+  if (std::ranges::none_of(refuses, [](const Test* test) { return test != nullptr; })) return {};
+  // Slots required below a nonterminal propagate to its callers, less the
+  // symbols before the call. Largest first settles each nonterminal once.
+  std::vector<std::uint32_t> needs(cfg.nonterminals);
+  if (!cfg.openings.empty()) {
+    std::vector<std::uint32_t> depths(cfg.openings.size());
+    for (std::size_t i = 0; i < cfg.openings.size(); ++i)
+      for (const auto& slot : cfg.openings[i]) depths[i] = std::max(depths[i], slot.depth + 1);
+    std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>> callers(cfg.nonterminals);
+    for (const auto& q : cfg.productions) {
+      if (q.opening) needs[q.lhs] = std::max(needs[q.lhs], depths[q.opening - 1]);
+      for (std::uint32_t at = 0; at < q.rhs.size(); ++at)
+        if (!is_terminal(q.rhs[at])) callers[index_of(q.rhs[at])].emplace_back(q.lhs, at);
+    }
+    std::priority_queue<std::pair<std::uint32_t, std::uint32_t>> work;
+    for (std::uint32_t nt = 0; nt < needs.size(); ++nt)
+      if (needs[nt]) work.emplace(needs[nt], nt);
+    while (!work.empty()) {
+      const auto [depth, nt] = work.top();
+      work.pop();
+      if (needs[nt] != depth) continue;
+      for (const auto [lhs, at] : callers[nt]) {
+        if (depth <= at || depth - at <= needs[lhs]) continue;
+        needs[lhs] = depth - at;
+        work.emplace(needs[lhs], lhs);
+      }
+    }
+  }
   const Items it(cfg);
-  std::vector<std::size_t> barred;
-  for (std::uint32_t p = 0; p < original; ++p) {
+  std::vector<bool> held;
+  for (std::uint32_t p = 0; p < cfg.productions.size(); ++p) {
     Production& q = cfg.productions[p];
-    barred.clear();
+    held.assign(q.rhs.size(), false);
+    std::uint32_t depth = 0;
+    for (std::size_t at = q.rhs.size(); at-- > 0;) {
+      if (depth) {
+        held[at] = true;
+        --depth;
+      }
+      const auto s = q.rhs[at];
+      if (!is_terminal(s)) depth = std::max(depth, needs[index_of(s)]);
+    }
+    std::uint32_t keep = 0;
     for (std::size_t at = 0; at < q.rhs.size(); ++at) {
       const Symbol s = q.rhs[at];
-      const Test* test = is_terminal(s) ? nullptr : refuses[index_of(s)];
-      // The symbols after it may begin with none of what it refuses.
-      if (test == nullptr || std::ranges::any_of(test->ahead, [&](std::uint16_t t) {
+      const Test* test = held[at] || is_terminal(s) ? nullptr : refuses[index_of(s)];
+      // A disjoint negative test becomes a bar on the next retained symbol.
+      if (test && std::ranges::none_of(test->ahead, [&](std::uint16_t t) {
             return it.after[it.base[p] + at].test(t);
-          }))
+          })) {
+        if (q.bars.empty() || q.bars.back().first != keep)
+          q.bars.emplace_back(keep, std::vector<std::uint16_t>{});
+        q.bars.back().second.insert(q.bars.back().second.end(), test->ahead.begin(),
+                                    test->ahead.end());
         continue;
-      const auto place = static_cast<std::uint32_t>(at - barred.size());
-      if (q.bars.empty() || q.bars.back().first != place)
-        q.bars.emplace_back(place, std::vector<std::uint16_t>{});
-      q.bars.back().second.insert(q.bars.back().second.end(), test->ahead.begin(),
-                                  test->ahead.end());
-      barred.push_back(at);
+      }
+      if (keep != at) {
+        q.rhs[keep] = s;
+        if (!q.scopes.empty()) q.scopes[keep] = q.scopes[at];
+        if (!q.takes.empty()) q.takes[keep] = q.takes[at];
+      }
+      ++keep;
     }
-    for (const std::size_t at : std::views::reverse(barred)) q.erase(at, 1);
+    if (keep < q.rhs.size()) q.erase(keep, q.rhs.size() - keep);
   }
+  return {};
 }
 
 Bits trivia_shadows(const Cfg& cfg, std::uint64_t scopes) {
@@ -1491,8 +1648,9 @@ std::uint32_t reduced_alone(const Cfg& cfg, const LrState& state) {
   return lone != 0 && !q.tested() && !q.start && !emptyNode ? lone : kNone;
 }
 
-LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const Bits& always,
-                      std::uint32_t maxStates) {
+static LrAutomaton automaton_of(const Cfg& cfg,
+                                const std::vector<RivalRow>& takes,
+                                const Bits& always, std::uint32_t maxStates) {
   const Items it(cfg);
   const std::vector<Start> starts = start_kernels(it);
   std::vector<std::uint32_t> startCores;
@@ -1631,12 +1789,14 @@ LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const 
     LrState& state = out.states.emplace_back(std::move(states[first]));
     for (auto& [terminal, to] : state.shifts) to = part[to];
     for (auto& [nt, to] : state.gotos) to = part[to];
-    for (const auto& pos : cores[core].kernel)
-      state.kernel.emplace_back(it.prod[pos.item], it.dot[pos.item]);
-    if (!selected.empty())
-      rivalled[core].each([&](std::size_t t) {
-        if (!selected[core].test(t)) state.doubted.push_back(static_cast<std::uint16_t>(t));
-      });
+    if (state.kernel.empty()) {
+      for (const auto& pos : cores[core].kernel)
+        state.kernel.emplace_back(it.prod[pos.item], it.dot[pos.item]);
+      if (!selected.empty())
+        rivalled[core].each([&](std::size_t t) {
+          if (!selected[core].test(t)) state.doubted.push_back(static_cast<std::uint16_t>(t));
+        });
+    }
     if (group.size() > 1) {
       std::map<std::uint32_t, Bits> reduces;
       for (const auto s : group) {
@@ -1661,6 +1821,369 @@ LrAutomaton build_lr1(const Cfg& cfg, const std::vector<RivalRow>& takes, const 
   for (std::size_t i = 1; i < startStates.size(); ++i)
     out.conditions.push_back(part[startStates[i]]);
   return out;
+}
+
+TurnContexts::TurnContexts(Cfg& cfg, const LrAutomaton& lr,
+                           std::span<const std::uint32_t> guarded) {
+  const auto& productions = cfg.productions;
+  const auto original = productions.size();
+  auto of = std::move(cfg.productionsOf);
+  const auto conditions = cfg.conditions.size();
+  const auto nnts = cfg.nonterminals;
+  // Infix nodes stay whole; nodes, gates and guarded copies inherit their level.
+  std::vector<std::uint8_t> infix(original);
+  for (const auto& table : cfg.infixes)
+    for (const auto& level : table.levels) {
+      infix[level.node] = 2;
+      for (const auto p : of[level.operators])
+        if (productions[p].rhs.empty()) infix[p] = 1;
+      for (const auto [t, p] : level.past) infix[p] = 1;
+    }
+  std::vector<bool> affected(nnts);
+  std::vector<std::vector<std::uint32_t>> parents(nnts), inverses(original);
+  std::vector<std::uint32_t> work;
+  for (std::uint32_t p = 0; p < original; ++p) {
+    const auto& q = productions[p];
+    if (q.copyOf != kNone) inverses[q.copyOf].push_back(p);
+    for (const auto s : q.rhs)
+      if (!is_terminal(s)) parents[index_of(s)].push_back(q.lhs);
+  }
+  std::vector<bool> visited(nnts);
+  const auto visit = [&](std::uint32_t nt) {
+    if (!visited[nt]) {
+      visited[nt] = true;
+      work.push_back(nt);
+    }
+  };
+  for (const auto nt : guarded) visit(nt);
+  std::vector<std::uint32_t> leaves;
+  while (!work.empty()) {
+    const auto nt = work.back();
+    work.pop_back();
+    for (const auto p : of[nt]) {
+      const auto& q = productions[p];
+      if (q.implied && !affected[nt]) {
+        affected[nt] = true;
+        leaves.push_back(nt);
+      }
+      for (const auto symbol : q.rhs)
+        if (!is_terminal(symbol)) visit(index_of(symbol));
+    }
+  }
+  // Omissions competing in one state keep the same fallback decision.
+  std::vector<std::vector<std::uint32_t>> statesOf(nnts),
+      impliedIn(lr.states.size());
+  for (std::uint32_t s = 0; s < lr.states.size(); ++s)
+    for (const auto& [p, on] : lr.states[s].reduces)
+      if (productions[p].implied) {
+        const auto nt = productions[p].lhs;
+        statesOf[nt].push_back(s);
+        impliedIn[s].push_back(nt);
+      }
+  std::vector<bool> reached(lr.states.size());
+  for (std::size_t i = 0; i < leaves.size(); ++i)
+    for (const auto s : statesOf[leaves[i]]) {
+      if (reached[s]) continue;
+      reached[s] = true;
+      for (const auto nt : impliedIn[s])
+        if (!affected[nt]) {
+          affected[nt] = true;
+          leaves.push_back(nt);
+        }
+    }
+  work = std::move(leaves);
+  while (!work.empty()) {
+    const auto nt = work.back();
+    work.pop_back();
+    for (const auto parent : parents[nt])
+      if (!affected[parent]) {
+        affected[parent] = true;
+        work.push_back(parent);
+      }
+  }
+  const auto append = [&](Production q, std::uint32_t original = kNone) {
+    const auto p = static_cast<std::uint32_t>(cfg.productions.size());
+    cfg.productions.push_back(std::move(q));
+    if (original != kNone && infix[original]) infixCopies.emplace_back(p, original);
+    return p;
+  };
+  const auto start = [&](std::uint32_t nt, std::uint16_t scope) {
+    Production q;
+    q.lhs = cfg.nonterminals++;
+    q.rhs = {nonterminal(nt)};
+    q.region = scope;
+    q.start = true;
+    const auto p = append(std::move(q));
+    cfg.conditions.push_back(p);
+    return p;
+  };
+  std::uint32_t falseCondition = 0;
+  const auto false_test = [&] {
+    if (falseCondition == 0) {
+      start(cfg.nonterminals++, 0);
+      falseCondition = static_cast<std::uint32_t>(cfg.conditions.size());
+    }
+    return falseCondition;
+  };
+  std::unordered_map<std::uint32_t, Symbol> gateOf;
+  const auto gate = [&](std::uint32_t state, std::uint16_t scope) {
+    if (const auto known = gateOf.find(state); known != gateOf.end())
+      return known->second;
+    const auto& from = lr.states[state];
+    const auto active = cfg.nonterminals++;
+    const auto root = start(active, scope);
+    const auto condition = static_cast<std::uint32_t>(cfg.conditions.size());
+    Production negative;
+    negative.lhs = cfg.nonterminals++;
+    negative.region = scope;
+    negative.tests.emplace_back().condition = condition;
+    negative.tests.back().unless = true;
+    const auto answer = nonterminal(negative.lhs);
+    append(std::move(negative));
+    gateOf.emplace(state, answer);
+    LrState reader;
+    reader.named = from.named;
+    reader.follow = from.follow;
+    reader.barred = from.barred;
+    reader.scopes = from.scopes;
+    reader.doubted = from.doubted;
+    reader.kernel = {{root, 0}};
+    const auto action = [&](Production q, const Bits& on,
+                            std::uint64_t scopes) {
+      q.lhs = active;
+      const auto p = append(std::move(q));
+      reader.reduces.emplace_back(p, on);
+      reader.behind.emplace_back(p, scopes);
+    };
+    const auto terms = [](const Bits& on) {
+      std::vector<std::uint16_t> out;
+      on.each([&](std::size_t t) {
+        out.push_back(static_cast<std::uint16_t>(t));
+      });
+      return out;
+    };
+    for (const auto& [p, on] : from.reduces) {
+      Production q;
+      q.region = productions[p].region;
+      if (productions[p].implied) {
+        q.tests.emplace_back().condition = false_test();
+        q.tests.back().ahead = terms(on);
+      } else {
+        q.tests = productions[p].tests;
+        if (q.tests.empty()) q.tests.emplace_back().ahead = terms(on);
+      }
+      const auto behind = std::ranges::lower_bound(
+          from.behind, p, {}, [](const auto& b) { return b.first; });
+      action(std::move(q), on,
+             behind == from.behind.end() || behind->first != p
+                 ? from.scopes
+                 : behind->second);
+    }
+    for (const auto [t, target] : from.shifts) {
+      Production q;
+      q.region = scope;
+      q.tests.emplace_back().ahead = {t};
+      Bits on(cfg.terminals.size());
+      on.set(t);
+      const auto under = std::ranges::lower_bound(
+          from.governs, t, {}, [](const auto& b) { return b.first; });
+      action(std::move(q), on,
+             under == from.governs.end() || under->first != t
+                 ? from.scopes
+                 : under->second);
+    }
+    readers.push_back(std::move(reader));
+    return answer;
+  };
+  // Callers are specialized by entry state; converged item tails are shared.
+  std::unordered_map<std::uint64_t, Symbol> copies;
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> sites;
+  const auto symbol_at = [&](std::uint32_t state, Symbol symbol) {
+    if (is_terminal(symbol) || !affected[index_of(symbol)]) return symbol;
+    const auto key = std::uint64_t{state} << 32 | index_of(symbol);
+    const auto [known, fresh] =
+        copies.try_emplace(key, nonterminal(cfg.nonterminals));
+    if (fresh) {
+      ++cfg.nonterminals;
+      sites.emplace_back(state, index_of(symbol));
+    }
+    return known->second;
+  };
+  const auto next_state = [&](std::uint32_t state, Symbol symbol) {
+    const auto next = [](const auto& edges, auto value) {
+      const auto at = std::ranges::lower_bound(
+          edges, value, {}, [](const auto& e) { return e.first; });
+      return at == edges.end() || at->first != value ? kNone : at->second;
+    };
+    return is_terminal(symbol)
+               ? next(lr.states[state].shifts, symbol)
+               : next(lr.states[state].gotos, index_of(symbol));
+  };
+  const auto rewrite = [&](Production& q, std::uint32_t state) {
+    for (auto& symbol : q.rhs) {
+      const auto old = symbol;
+      symbol = symbol_at(state, old);
+      state = next_state(state, old);
+      if (state == kNone) return;
+    }
+  };
+  rewrite(cfg.productions[0], 0);
+  for (std::size_t i = 0; i < conditions; ++i)
+    rewrite(cfg.productions[cfg.conditions[i]], lr.conditions[i]);
+  struct Tail {
+    std::uint32_t production, dot, state;
+    Symbol symbol = kNone;
+    std::uint32_t next = kNone, uses = 0;
+    bool complete = false;
+  };
+  std::vector<std::uint32_t> base(original);
+  std::uint32_t items = 0;
+  for (std::uint32_t p = 0; p < original; ++p) {
+    base[p] = items;
+    items += static_cast<std::uint32_t>(productions[p].rhs.size());
+  }
+  std::unordered_map<std::uint64_t, std::uint32_t> tailOf;
+  std::vector<Tail> tails;
+  const auto tail_at = [&](std::uint32_t p, std::uint32_t dot,
+                           std::uint32_t state) {
+    const auto key = std::uint64_t{base[p] + dot} << 32 | state;
+    const auto [at, fresh] =
+        tailOf.try_emplace(key, static_cast<std::uint32_t>(tails.size()));
+    if (fresh) tails.push_back({p, dot, state});
+    ++tails[at->second].uses;
+    return at->second;
+  };
+  struct Alternative {
+    std::uint32_t production, lhs, state, tail;
+  };
+  std::vector<Alternative> alternatives;
+  std::size_t site = 0, tail = 0;
+  while (site < sites.size() || tail < tails.size()) {
+    while (site < sites.size()) {
+      const auto [state, nt] = sites[site++];
+      const auto lhs = index_of(copies.at(std::uint64_t{state} << 32 | nt));
+      for (const auto p : of[nt])
+        alternatives.push_back(
+            {p, lhs, state,
+             productions[p].rhs.empty() ? kNone : tail_at(p, 0, state)});
+    }
+    while (tail < tails.size()) {
+      const auto at = tail++;
+      const auto [p, dot, state, symbol, next, uses, complete] = tails[at];
+      const auto old = productions[p].rhs[dot];
+      tails[at].symbol = symbol_at(state, old);
+      const auto reached = next_state(state, old);
+      if (reached == kNone) continue;
+      if (dot + 1 == productions[p].rhs.size())
+        tails[at].complete = true;
+      else {
+        const auto next = tail_at(p, dot + 1, reached);
+        tails[at].next = next;
+      }
+    }
+  }
+  // An absent transition discards its entire alternative, including shared
+  // tails.
+  std::vector<std::uint8_t> viable(tails.size());
+  for (std::uint32_t t = 0; t < tails.size(); ++t) {
+    auto at = t;
+    work.clear();
+    while (viable[at] == 0) {
+      work.push_back(at);
+      if (tails[at].next == kNone) {
+        viable[at] = tails[at].complete ? 2 : 1;
+        break;
+      }
+      at = tails[at].next;
+    }
+    for (const auto part : work) viable[part] = viable[at];
+  }
+  std::vector<Symbol> shared(tails.size(), kNone);
+  std::vector<std::uint32_t> pending;
+  const auto share = [&](std::uint32_t at) {
+    if (shared[at] == kNone) {
+      shared[at] = nonterminal(cfg.nonterminals++);
+      pending.push_back(at);
+    }
+    return shared[at];
+  };
+  const auto emit = [&](std::uint32_t p, std::uint32_t lhs,
+                        std::uint32_t state, std::uint32_t first,
+                        bool whole) {
+    const auto& from = productions[p];
+    Production q;
+    q.lhs = lhs;
+    q.rule = from.rule;
+    q.alternative = from.alternative;
+    q.region = from.region;
+    q.prefixTurn = from.prefixTurn;
+    if (whole) {
+      q.entry = from.entry;
+      q.tests = from.tests;
+      q.opening = from.opening;
+      q.capture = from.capture;
+      q.start = from.start;
+      q.rank = from.rank;
+    }
+    const auto begin = first == kNone ? 0 : tails[first].dot;
+    auto end = static_cast<std::uint32_t>(from.rhs.size());
+    for (auto at = first; at != kNone; at = tails[at].next) {
+      const auto& part = tails[at];
+      q.rhs.push_back(part.symbol);
+      if (!from.scopes.empty()) q.scopes.push_back(from.scope_at(part.dot));
+      if (!from.takes.empty()) q.takes.push_back(from.takes[part.dot]);
+      if (part.next != kNone && tails[part.next].uses > 1 && infix[p] != 2) {
+        end = tails[part.next].dot;
+        q.rhs.push_back(share(part.next));
+        if (!from.scopes.empty()) q.scopes.push_back(from.scope_at(end));
+        if (!from.takes.empty()) q.takes.push_back(kNone);
+        break;
+      }
+    }
+    const auto bars = std::ranges::lower_bound(
+        from.bars, begin, {}, [](const auto& b) { return b.first; });
+    for (auto b = bars; b != from.bars.end() && b->first <= end; ++b)
+      q.bars.emplace_back(b->first - begin, b->second);
+    if (from.implied) q.rhs.push_back(gate(state, q.region));
+    return append(std::move(q), whole ? p : kNone);
+  };
+  for (const auto& [p, lhs, state, first] : alternatives) {
+    if (first != kNone && viable[first] != 2) continue;
+    const auto made = emit(p, lhs, state, first, true);
+    for (const auto inverse : inverses[p]) {
+      Production copy = productions[inverse];
+      copy.lhs = lhs;
+      copy.rhs = cfg.productions[made].rhs;
+      copy.copyOf = made;
+      append(std::move(copy), inverse);
+    }
+  }
+  for (std::size_t i = 0; i < pending.size(); ++i) {
+    const auto at = pending[i];
+    emit(tails[at].production, index_of(shared[at]), tails[at].state, at,
+         false);
+  }
+  cfg.productionsOf = std::move(of);
+  cfg.productionsOf.resize(cfg.nonterminals);
+  for (auto& row : cfg.productionsOf) row.clear();
+  for (std::uint32_t p = 0; p < cfg.productions.size(); ++p) {
+    const auto& q = cfg.productions[p];
+    if (q.copyOf == kNone &&
+        (p >= original || !affected[q.lhs] || p == 0 || q.start))
+      cfg.productionsOf[q.lhs].push_back(p);
+  }
+}
+
+LrAutomaton build_lr1(Cfg& cfg, const std::vector<RivalRow>& takes,
+                      const Bits& always, std::uint32_t maxStates) {
+  if (!cfg.turnContexts) {
+    if (const auto deferred = bar_tests(cfg); !deferred.empty()) {
+      cfg.turnContexts = std::make_shared<TurnContexts>(
+          cfg, automaton_of(cfg, takes, always, maxStates), deferred);
+      bar_tests(cfg);
+    }
+  }
+  return automaton_of(cfg, takes, always, maxStates);
 }
 
 }  // namespace cursiv::engine::gen

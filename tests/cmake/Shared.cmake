@@ -76,6 +76,8 @@ cursiv_test(Conformance_test
     conformancelrGenerated sectionpredicatelrGenerated hushedlrGenerated branchvalueslrGenerated)
 set_target_properties(AstTree_test Conformance_test PROPERTIES
     UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
+cursiv_timeout(Conformance_test 30)
+cursiv_timeout(InfixOperators_test 30)
 cursiv_timeout(LexicalBackends_test 30)
 cursiv_timeout(RecursiveTerminals_test 30)
 

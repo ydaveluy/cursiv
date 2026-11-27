@@ -998,6 +998,73 @@ void levels_that_open_a_line_group(const cursiv::Parser& p) {
   }
 }
 
+void virtual_operator_prefixes_keep_their_levels(const cursiv::Parser& p) {
+  const struct {
+    std::string_view text, expected;
+  } cases[] = {
+      {"one:x\n  a\n", "(x++)"},
+      {"one:x\n  b\n", "(x--)"},
+      {"postonly:x\n  a\n", "(x++)"},
+      {"postonly:x\n  b\n", "(x--)"},
+      {"postonly:x\na\n", "<refused>"},
+      {"postin:x\n  a\n", "(x++)"},
+      {"postin:x\n  b\n", "(x--)"},
+      {"postin:x\n*y\n  a\n", "(x * (y++))"},
+      {"postin:x\n*y\n  b\n", "((x * y)--)"},
+      {"postin:x\n*y\n*z\n  b\n", "(((x * y) * z)--)"},
+      {"postout:\n  x\na\n", "(x++)"},
+      {"postout:\n  x\nb\n", "(x--)"},
+      {"postout:\n  x\n  *y\na\n", "(x * (y++))"},
+      {"postout:\n  x\n  *y\nb\n", "((x * y)--)"},
+      {"prein:\n  a x*y\n", "((+x) * y)"},
+      {"prein:\n  b x*y\n", "(-(x * y))"},
+      {"preout:\n  start\na x*y\n", "((+x) * y)"},
+      {"preout:\n  start\nb x*y\n", "(-(x * y))"},
+      {"binaryin:x\n  a\ny\n  a\nz\n", "((x + y) + z)"},
+      {"binaryin:x\n  b\ny\n  b\nz\n", "(x - (y - z))"},
+      {"binaryin:x\n  b\ny\n  a\nz\n", "(x - (y + z))"},
+      {"binaryin:x\n  a\ny\n  b\nz\n", "((x + y) - z)"},
+      {"binaryin:x\n  c\ny\n", "(x < y)"},
+      {"binaryin:x\n  c\ny\n  c\nz\n", "<refused>"},
+      {"binaryout:\n  x\na\n  y\na\n  z\n", "((x + y) + z)"},
+      {"binaryout:\n  x\nb\n  y\nb\n  z\n", "(x - (y - z))"},
+      {"binaryout:\n  x\nb\n  y\na\n  z\n", "(x - (y + z))"},
+      {"binaryout:\n  x\na\n  y\nb\n  z\n", "((x + y) - z)"},
+      {"binaryout:\n  x\nc\n  y\n", "(x < y)"},
+      {"binaryout:\n  x\nc\n  y\nc\n  z\n", "<refused>"},
+      {"postin:x\na\n", "<refused>"},
+      {"postout:\n  x\n  a\n", "<refused>"},
+      {"mixed:x\n*y\n  a\n", "(x * (y++))"},
+      {"mixed:x\n*y\n  b\n", "((x * y)--)"},
+      {"mixed:x\n*y\n++", "(x * (y++))"},
+      {"mixed:x\n*y\n--", "((x * y)--)"},
+      {"bothin:x\n  a\ny\n  a\nz\n", "((x + y) + z)"},
+      {"bothin:x\n  b\ny\n  b\nz\n", "(x - (y - z))"},
+      {"bothin:x\n  b\ny\n  a\nz\n", "(x - (y + z))"},
+      {"bothin:x\n  a\ny\n  b\nz\n", "((x + y) - z)"},
+      {"bothin:x\n  c\ny\n  c\nz\n", "<refused>"},
+      {"bothout:\n  x\na\n  y\na\n  z\n", "((x + y) + z)"},
+      {"bothout:\n  x\nb\n  y\nb\n  z\n", "(x - (y - z))"},
+      {"bothout:\n  x\nb\n  y\na\n  z\n", "(x - (y + z))"},
+      {"bothout:\n  x\na\n  y\nb\n  z\n", "((x + y) - z)"},
+      {"bothout:\n  x\nc\n  y\nc\n  z\n", "<refused>"},
+      {"one:;x r\n  a\n", "(x++)"},
+      {"one:r\n  a\n", "(r++)"},
+      {"postonly:;x r\n  b\n", "(x--)"},
+      {"postin:;x r\n*y\n  b\n", "((x * y)--)"},
+      {"postout:\n  ;x r\n  *y\nb\n", "((x * y)--)"},
+      {"prein:\n  b ;x r*y\n", "(-(x * y))"},
+      {"prein:\n  b r*y\n", "(-(r * y))"},
+      {"preout:\n  start\nb ;x r*y\n", "(-(x * y))"},
+      {"binaryin:;x r\n  b\ny\n  a\n;z r\n", "(x - (y + z))"},
+      {"binaryout:\n  ;x r\nb\n  y\na\n  ;z r\n", "(x - (y + z))"},
+      {"one:x r\n  a\n", "<refused>"},
+  };
+  for (const auto tag : {"indented:direct:", "indented:named:"})
+    for (const auto& sample : cases)
+      check(p, tag, sample.text, sample.expected);
+}
+
 // A line that opens with an operator a looser level's node would give its
 // operand to begins a statement.
 void a_line_ends_what_its_operators_leave(const cursiv::Parser& p) {
@@ -1165,6 +1232,7 @@ void exercise(const cursiv::Parser& p) {
   a_cyclic_table_reads_its_levels(p);
   a_newline_ends_what_reads_it(p);
   levels_that_open_a_line_group(p);
+  virtual_operator_prefixes_keep_their_levels(p);
   a_line_ends_what_its_operators_leave(p);
   an_operator_guarded_twice_ends_where_one_fails(p);
   a_block_brings_line_ends_back(p);

@@ -80,6 +80,13 @@ struct Suite : cursiv::GrammarSpec {
   // Counts of `w` read only at the end of the text, a long one and a short one.
   struct LAST : terminal<repeat<1, 32>(repeat<1, 32>(lit<"w">)) + eof> {};
   struct FEW : terminal<repeat<1, 8>(repeat<1, 8>(lit<"w">)) + eof> {};
+  struct LAST_MIXED : terminal<repeat<1, 32>(repeat<1, 32>(cr<"wx">)) + eof> {};
+  struct FEW_MIXED : terminal<repeat<1, 8>(repeat<1, 8>(cr<"wx">)) + eof> {};
+  struct END_GUARD : terminal<some(lit<"w">) + &(lit<";"> + eof)> {};
+  struct END_PAIRS : terminal<some(lit<"wx">) + &(lit<";;"> + eof)> {};
+  struct END_UTF8 : terminal<some(lit<"é">) + &(lit<"→"> + eof)> {};
+  struct END_OTHER : terminal<some(lit<"wx">) + &(lit<";;"> + eof)> {};
+  struct LONG : terminal<some(lit<"a">) + lit<"b">> {};
   struct Root
       : rule<create<ast::Items>(
             (lit<"path:"> + many(append<&ast::Items::items>(ref<PathItem>))) |
@@ -95,8 +102,22 @@ struct Suite : cursiv::GrammarSpec {
                 (&(lit<"x"> + ref<DASHED>) + lit<"x"> + lit<"-"> + lit<"~"> +
                  assign<&ast::Item::name>(ref<ID>)) |
                 (lit<"x"> + lit<"-"> + lit<"~"> + lit<";">)))) |
-            (lit<"last:"> + (ref<LAST> | lit<";">)) |
-            (lit<"few:"> + (ref<FEW> | lit<";">)) |
+             (lit<"last:"> + (ref<LAST> | lit<";">)) |
+             (lit<"few:"> + (ref<FEW> | lit<";">)) |
+             (lit<"mixedlast:"> + (ref<LAST_MIXED> | lit<";">)) |
+             (lit<"mixedfew:"> + (ref<FEW_MIXED> | lit<";">)) |
+            (lit<"guardend:"> + append<&ast::Items::items>(create<ast::Item>(
+                (assign<&ast::Item::name>(ref<END_GUARD>) | lit<"#">) + lit<";">))) |
+            (lit<"guardpairs:"> + append<&ast::Items::items>(create<ast::Item>(
+                (assign<&ast::Item::name>(ref<END_PAIRS>) | lit<"#">) + lit<";;">))) |
+            (lit<"crossing:"> + append<&ast::Items::items>(create<ast::Item>(
+                many(ref<LONG> | lit<"a">) + assign<&ast::Item::name>(lit<"x">)))) |
+            (lit<"guardutf8:"> + append<&ast::Items::items>(create<ast::Item>(
+                (assign<&ast::Item::name>(ref<END_UTF8>) | lit<"#">) + lit<"→">))) |
+            (lit<"guardelect:"> + append<&ast::Items::items>(create<ast::Item>(
+                (gap::none + assign<&ast::Item::name>(ref<END_PAIRS>) + lit<";;">) |
+                (gap::line + assign<&ast::Item::size>(ref<END_OTHER>) + lit<";;">) |
+                (lit<"#"> + lit<";;">)))) |
             // A literal `a` read only before `;c`, beside a name.
             (lit<"guard:"> + ((ref<ID> + lit<";"> + option(lit<"c"> | lit<"e">)) |
                               (lit<"a", &lit<";c">> + lit<";"> + lit<"d">))) |
@@ -123,6 +144,12 @@ struct Suite : cursiv::GrammarSpec {
   using entry = Root;
   using ignored = WS;
   using hidden = COMMENT;
+};
+
+struct Cyclic : cursiv::GrammarSpec {
+  struct WORD : terminal<many(lit<"wx">) + lit<"y"> + eof> {};
+  struct Root : rule<create<ast::Item>(assign<&ast::Item::name>(ref<WORD>))> {};
+  using entry = Root;
 };
 
 }  // namespace twords

@@ -308,6 +308,78 @@ int main() {
     expect(guarded, "b d", false);
     conformance_test::one_tree(guarded, "a d d e");
   }
+  // Omitted recursive prefixes terminate without outranking ordinary actions.
+  {
+    const Entry implied{"impliedprefix:"};
+    const auto source = implied.source("a");
+    cursiv::Cst cst(source);
+    cursiv::CstBuilder builder(cst);
+    cursiv::engine::Machine machine(tconformance::generated::Suite::kTables,
+                                    source, builder.stream(),
+                                    cursiv::kNoCancel);
+    CHECK(cursiv::engine::run(machine) == cursiv::engine::Exit::refused);
+    CHECK(machine.explored < 512);
+    for (const auto text : {"a", "ab", " a", ";a", ";\na"})
+      expect(implied, text, false);
+    for (const auto text : {"\na", ";\nab", ";;\nabb"})
+      expect(implied, text, true);
+    const Entry direct{"implieddirect:"};
+    expect(direct, "a", true);
+    expect(direct, "ab", false);
+    expect(direct, ";ab", true);
+    const Entry nullable{"impliednullable:"};
+    for (const auto text : {"", "q", "b", ";b", ";;bb"})
+      expect(nullable, text, true);
+    for (const auto text : {"bb", "qb", " b", ";bb"})
+      expect(nullable, text, false);
+    const Entry priority{"impliedpriority:"};
+    expect(priority, "bx", true);
+    expect(priority, "bz", false);
+    expect(priority, ";bz", true);
+    const Entry reduction{"impliedreduce:"};
+    expect(reduction, "bx", true);
+    expect(reduction, "bz", false);
+    expect(reduction, ";bz", true);
+    const Entry repeated{"impliedrepeated:"};
+    const auto closed = [&](unsigned count) {
+      std::string text = "ab";
+      for (unsigned i = 0; i < count; ++i) text += "cb";
+      return text;
+    };
+    expect(repeated, closed(64), true);
+    CHECK(steps(repeated.source(closed(64))) <
+          3 * steps(repeated.source(closed(32))));
+    const Entry expression{"impliedexpression:"};
+    const auto operand = [](const ast::Expression* node, std::string_view op) {
+      const auto name = [](const ast::Expression* child) {
+        const auto* n = cursiv::ast_cast<ast::Name>(child);
+        return n && n->name == "x";
+      };
+      if (op.empty()) return name(node);
+      const auto* binary = cursiv::ast_cast<ast::Binary>(node);
+      return binary && binary->op == op && name(binary->left) &&
+             name(binary->right);
+    };
+    for (const auto& [text, op, left, right] :
+         {std::tuple{"x+x*x", "+", "", "*"}, std::tuple{"x*x+x", "+", "*", ""},
+          std::tuple{"x+x+x", "+", "+", ""}, std::tuple{"x^x^x", "^", "", "^"},
+          std::tuple{";xb+x", "+", "", ""}}) {
+      tree<ast::Binary>(expression, text, [&](const ast::Binary& node) {
+        return node.op == op && operand(node.left, left) &&
+               operand(node.right, right);
+      });
+    }
+    expect(expression, "x<x<x", false);
+    const Entry shared{"impliedshared:"};
+    for (const auto text : {"pccccccccx*x+x!q", "rccccccccx*x+x!s"})
+      tree<ast::Program>(shared, text, [&](const ast::Program& node) {
+        if (node.statements.size() != 1) return false;
+        const auto* binary =
+            cursiv::ast_cast<ast::Binary>(node.statements.front());
+        return binary && binary->op == "+" && operand(binary->left, "*") &&
+               operand(binary->right, "");
+      });
+  }
   // A name is no number and no capitalised word, whatever its length; one
   // that only begins as either is a name.
   const Entry unboundedName{"unboundedname:"};

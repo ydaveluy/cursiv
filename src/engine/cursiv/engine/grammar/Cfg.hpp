@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -144,8 +145,7 @@ struct Production {
   // Per symbol, the entry its one record takes over, none where the record
   // keeps its own; may be empty where no symbol's does.
   std::vector<std::uint32_t> takes;
-  // The infix node it copies under a test of the gap turned the other way,
-  // reduced where a tighter level read past that test; none for an
+  // The infix node this guarded reduction copies; none for an ordinary
   // alternative of its nonterminal.
   std::uint32_t copyOf = kNone;
   // Its symbols from `at` on, `count` of them, gone with their scopes and
@@ -192,30 +192,29 @@ struct Infix {
   struct Level {
     Association group = Association::Left;
     // The production that builds a node of this level, and the nonterminal
-    // of the level's operators.
+    // of its operators or their initial gate.
     std::uint32_t node = 0;
     std::uint32_t operators = 0;
-    // Per token that operators of tighter levels read past a test of the
-    // gap, a copy of the node reduced on it where that test fails; ascending.
+    // Per operator token, a guarded copy of `node` that may finish before
+    // it even where a tighter level can read on; ascending.
     std::vector<std::pair<std::uint16_t, std::uint32_t>> past;
   };
   // The tightest first.
   std::vector<Level> levels;
-  // A node of level `l` against the binary or postfix operators of levels
-  // `met` that one token begins: whether it is reduced before one, and
-  // whether one may come. A postfix node ends with its operator, so no
-  // operator takes its operand: both stand.
+  // A node against the ascending levels a token begins: whether it reduces
+  // before an operator, and whether one may follow. A postfix keeps both.
   [[nodiscard]] std::pair<bool, bool> order(std::uint32_t l, const auto& met) const {
     const Association group = levels[l].group;
     if (group == Association::Postfix) return {true, true};
-    bool before = false, coming = false;
-    for (const std::uint32_t m : met) {
-      before = before || l < m || (l == m && group == Association::Left);
-      coming = coming || m < l || (l == m && group == Association::Right);
-    }
-    return {before, coming};
+    if (std::ranges::empty(met)) return {false, false};
+    const std::uint32_t first = *std::ranges::begin(met);
+    const std::uint32_t last = *std::prev(std::ranges::end(met));
+    return {l < last || (l == last && group == Association::Left),
+            first < l || (l == first && group == Association::Right)};
   }
 };
+
+struct TurnContexts;
 
 struct Cfg {
   // An entry is what one record carries: the actions of the records fused
@@ -316,6 +315,8 @@ struct Cfg {
     }
   }
   std::vector<Infix> infixes;
+  // Frozen one-action conditions and infix origins of recursive omissions.
+  std::shared_ptr<const TurnContexts> turnContexts;
   // Per data rule, the action that converts what it read and its nonterminal.
   std::vector<std::pair<std::uint16_t, std::uint32_t>> dataRules;
   std::vector<Entry> entries;

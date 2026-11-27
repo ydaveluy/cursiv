@@ -5,6 +5,7 @@ cursiv_grammar(caret lsp/completion/CaretGrammar.hpp tcaret::Caret EXTENSIONS .c
 cursiv_grammar(block lsp/completion/BlockGrammar.hpp tblock::Block EXTENSIONS .block)
 # Terminals of words beside the data rule reading the same words.
 cursiv_grammar(wordslr lsp/completion/WordsGrammar.hpp twords::Suite)
+cursiv_grammar(wordscycle lsp/completion/WordsGrammar.hpp twords::Cyclic)
 
 cursiv_grammar(repairmsg core/validation/RepairMessageGrammar.hpp tmsg::MessageG)
 cursiv_test(validation_test core/validation/validation_test.cpp cursiv::lsp wsCore repairmsgGenerated)
@@ -93,7 +94,7 @@ if(NOT CMAKE_CXX_FLAGS MATCHES "sanitize=thread")
 endif()
 
 cursiv_test(completion_test "lsp/completion/completion_test.cpp;lsp/completion/CaretLane.cpp" cursiv::lsp wsCore
-    caretGenerated blockGenerated wordslrGenerated)
+    caretGenerated blockGenerated wordslrGenerated wordscycleGenerated)
 set_target_properties(completion_test PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 0)
 
 cursiv_test(edits_test $<TARGET_OBJECTS:editsObjects> cursiv::lsp wsLsp)

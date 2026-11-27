@@ -5,7 +5,6 @@
 #include <array>
 #include <bit>
 #include <functional>
-#include <iterator>
 #include <map>
 #include <ranges>
 #include <set>
@@ -191,7 +190,7 @@ class Emitter {
           for (const auto rival : _p.retryTerminals[action.rivals]) _read[_p.solo[rival]] = true;
         }
       }
-      if (state.reduce == kNone && _refutes && state.again != kNoMode) _read[state.again] = true;
+      if (state.again != kNoMode) _read[state.again] = true;
     }
     lexer();
     const std::string lexers = take();
@@ -1360,10 +1359,7 @@ class Emitter {
     };
     const bool holds = held && tested(production);
     std::string tests;
-    if (holds) {
-      _refutes = true;
-      tests = ", &holds" + std::to_string(production) + "<M>";
-    }
+    if (holds) tests = ", &holds" + std::to_string(production) + "<M>";
     reached(production, held);
     // The machine's form where sites end a turn of a list: all, or some.
     unsigned machine = form;
@@ -1506,14 +1502,12 @@ class Emitter {
       case PackedAction::Kind::accept:
         return {.terminal = action.terminal, .step = kAccepted};
       case PackedAction::Kind::reread:
-        return {.value = rows.at(static_cast<std::uint16_t>(action.value)),
-                .terminal = action.terminal,
-                .step = kReread,
-                .element = static_cast<std::uint16_t>(action.value)};
-      case PackedAction::Kind::retryTie:
         break;
     }
-    return {.value = s, .step = kRetryTie};
+    return {.value = rows.at(static_cast<std::uint16_t>(action.value)),
+            .terminal = action.terminal,
+            .step = kReread,
+            .element = static_cast<std::uint16_t>(action.value)};
   }
 
   // An arm a run goes on from: `action` on the token in hand, read first as
@@ -2337,9 +2331,6 @@ class Emitter {
   // Whether the word being written is a function of its own under a called
   // lexer: a token it drops goes back to the lexer.
   bool _ownWord = false;
-  // Whether a reduction's tests may refuse the token in hand: `again` is
-  // written.
-  bool _refutes = false;
   // The modes a lexer is written for.
   std::vector<bool> _read;
   // The functions that read a token by the automaton's first steps: each

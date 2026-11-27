@@ -64,12 +64,12 @@ struct WordPath {
 struct PackedAction {
   // `reread`: the text of the token in hand read again by the state in
   // another mode, where the stack takes none of the token's other actions.
-  enum class Kind : std::uint8_t { shift, reduce, accept, reread, retryTie };
+  enum class Kind : std::uint8_t { shift, reduce, accept, reread };
   std::uint16_t terminal = 0;
   Kind kind = Kind::shift;
   // A shift's state, a reduce's production, a reread's mode.
   std::uint32_t value = 0;
-  // The leaf's entry where the action shifts; the state a reread is of.
+  // The leaf's entry where the action shifts.
   std::uint32_t entry = kNone;
   // Where it shifts, the unit productions its step takes: a list of
   // `Packed::hops`.
@@ -83,9 +83,9 @@ struct PackedAction {
   std::uint32_t rivals = 0;
 
   // Actions share code when they treat the stack, tree, gap and indentation alike.
-  using Key = std::tuple<Kind, std::uint32_t, std::uint32_t, std::uint16_t, Nesting, std::uint32_t>;
+  using Key = std::tuple<Kind, std::uint32_t, std::uint32_t, std::uint16_t, Nesting>;
   Key key(const Cfg& cfg) const {
-    return {kind, value, entry, gap, cfg.nesting(terminal), rivals};
+    return {kind, value, entry, gap, cfg.nesting(terminal)};
   }
 };
 

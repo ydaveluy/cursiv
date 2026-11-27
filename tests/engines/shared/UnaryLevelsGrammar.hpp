@@ -367,6 +367,94 @@ struct Lines : cursiv::GrammarSpec {
                                     NLs))> {};
 };
 
+// Virtual operator prefixes keep their token identity across precedence levels.
+struct Indented : Base {
+  struct IN : terminal<indent> {};
+  struct OUT : terminal<dedent> {};
+  static constexpr auto plus = [] { return std::string_view("+"); };
+  static constexpr auto minus = [] { return std::string_view("-"); };
+  static constexpr auto less = [] { return std::string_view("<"); };
+  struct Primary : rule<ref<Lines::Name> | (implied(lit<";">, gap::none) +
+                                            ref<Primary> + lit<"r">)> {};
+  template <auto In, auto Out>
+  struct Operators {
+    static constexpr auto a = In + lit<"a"> + ref<Lines::NEWLINE> + Out;
+    static constexpr auto b = In + lit<"b"> + ref<Lines::NEWLINE> + Out;
+    static constexpr auto c = In + lit<"c"> + ref<Lines::NEWLINE> + Out;
+    struct Line : rule<ref<Primary> + ref<Lines::NEWLINE>> {};
+    struct Once
+        : infix<Line, ast::Binary,
+                postfix<ast::Postfix>(as<Step::inc>(a) | as<Step::dec>(b))> {};
+    struct PostOnly : infix<Line, ast::Binary,
+                            levels(postfix<ast::Postfix>(as<Step::inc>(a)),
+                                   postfix<ast::Postfix>(as<Step::dec>(b)))> {};
+    struct PostIn
+        : infix<Line, ast::Binary,
+                levels(postfix<ast::Postfix>(as<Step::inc>(a)), left(lit<"*">),
+                       postfix<ast::Postfix>(as<Step::dec>(b)))> {};
+    struct PostOut : infix<Line, ast::Binary,
+                           levels(postfix<ast::Postfix>(as<Step::inc>(
+                                      Out + lit<"a"> + ref<Lines::NEWLINE>)),
+                                  left(lit<"*">),
+                                  postfix<ast::Postfix>(as<Step::dec>(
+                                      Out + lit<"b"> + ref<Lines::NEWLINE>)))> {
+    };
+    struct PreIn
+        : infix<Primary, ast::Binary,
+                levels(prefix<ast::Signed>(as<plus>(In + lit<"a">)),
+                       left(lit<"*">),
+                       prefix<ast::Signed>(as<minus>(In + lit<"b">)))> {};
+    struct PreOut
+        : infix<Primary, ast::Binary,
+                levels(prefix<ast::Signed>(as<plus>(Out + lit<"a">)),
+                       left(lit<"*">),
+                       prefix<ast::Signed>(as<minus>(Out + lit<"b">)))> {};
+    struct BinaryIn : infix<Line, ast::Binary,
+                            levels(left(as<plus>(a)), right(as<minus>(b)),
+                                   nonassoc(as<less>(c)))> {};
+    struct BinaryOut
+        : infix<Line, ast::Binary,
+                levels(
+                    left(as<plus>(Out + lit<"a"> + ref<Lines::NEWLINE> + In)),
+                    right(as<minus>(Out + lit<"b"> + ref<Lines::NEWLINE> + In)),
+                    nonassoc(as<less>(Out + lit<"c"> + ref<Lines::NEWLINE> +
+                                      In)))> {};
+    struct Mixed
+        : infix<Line, ast::Binary,
+                levels(postfix<ast::Postfix>(as<Step::inc>(a | lit<"++">)),
+                       left(lit<"*">),
+                       postfix<ast::Postfix>(as<Step::dec>(b | lit<"--">)))> {};
+    struct Both
+        : infix<Line, ast::Binary,
+                levels(left(as<plus>(
+                           a | (Out + lit<"a"> + ref<Lines::NEWLINE> + In))),
+                       right(as<minus>(
+                           b | (Out + lit<"b"> + ref<Lines::NEWLINE> + In))),
+                       nonassoc(as<less>(c | (Out + lit<"c"> +
+                                              ref<Lines::NEWLINE> + In))))> {};
+    struct Root
+        : rule<create<ast::Doc>(assign<&ast::Doc::value>(
+                   (lit<"one:"> + ref<Once>) |
+                   (lit<"postonly:"> + ref<PostOnly>) |
+                   (lit<"postin:"> + ref<PostIn>) |
+                   (lit<"postout:"> + ref<Lines::NEWLINE> + In + ref<PostOut>) |
+                   (lit<"prein:"> + ref<Lines::NEWLINE> + ref<PreIn> +
+                    ref<Lines::NEWLINE> + Out) |
+                   (lit<"preout:"> + ref<Lines::NEWLINE> + In + lit<"start"> +
+                    ref<Lines::NEWLINE> + ref<PreOut> + ref<Lines::NEWLINE>) |
+                   (lit<"binaryin:"> + ref<BinaryIn>) |
+                   (lit<"binaryout:"> + ref<Lines::NEWLINE> + In +
+                    ref<BinaryOut> + Out) |
+                   (lit<"mixed:"> + ref<Mixed>) | (lit<"bothin:"> + ref<Both>) |
+                   (lit<"bothout:"> + ref<Lines::NEWLINE> + In + ref<Both> +
+                    Out))) +
+               eof> {};
+  };
+  struct Root
+      : rule<(lit<"direct:"> + ref<Operators<indent, dedent>::Root>) |
+             (lit<"named:"> + ref<Operators<ref<IN>, ref<OUT>>::Root>)> {};
+};
+
 // Rules that may read nothing, nested two by two, which only what follows them
 // tells apart: one closure walks every way through them.
 struct Empties : Base {
@@ -422,7 +510,9 @@ struct Suite : Base {
                      (lit<"told:"> + skip(ignore<Lines::WS, Lines::NL>, hide<Lines::NOTE>,
                                           ref<Lines::Told> + eof)) |
                      (lit<"indexed:"> + skip(ignore<Lines::WS, Lines::NL>, hide<>,
-                                             ref<Lines::Indexes> + eof))> {};
+                                             ref<Lines::Indexes> + eof)) |
+                      (lit<"indented:"> + skip(ignore<Lines::WS>, hide<>,
+                                               ref<Indented::Root>))> {};
   using entry = Root;
   using hidden = Lines::NOTE;
   using indent_newline = Lines::NEWLINE;

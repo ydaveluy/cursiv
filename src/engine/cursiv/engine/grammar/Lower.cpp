@@ -12,6 +12,7 @@
 
 #include "cursiv/grammar/expr.hpp"
 #include "cursiv/engine/lexer/LexAutomaton.hpp"
+#include "cursiv/engine/parser/Bits.hpp"
 #include "cursiv/utils/Descent.hpp"
 
 namespace cursiv::engine::gen {
@@ -98,13 +99,9 @@ class Lowering {
   }
 
  private:
-  // A token that opens operators of several levels of an infix rule that
-  // stand at one place, before an operand or behind one, is read as a copy
-  // of its own per level, spelled the same: the token after it tells which
-  // reads on. A nonterminal such levels begin with is copied the same way.
-  // What levels of several places begin with keeps its tokens. A node a
-  // tighter operator takes a token from past a test of the gap keeps it
-  // where that test fails.
+  // Specialize shared operator starts per level and place. Lexical tokens
+  // are copied; virtual tokens keep their identity through level gates.
+  // Guarded operators leave their operands where their tests fail.
   void operator_copies() {
     if (_cfg.infixes.empty()) return;
     // The nonterminals that may read nothing.
@@ -117,39 +114,96 @@ class Lowering {
         if (is_terminal(s) || !blank[index_of(s)]) break;
       }
     };
-    // Per level of every table, numbered across them: its place and the
-    // nonterminal of its operators. Per place and symbol an operator may
-    // begin with, the levels it begins; per nonterminal, the one level that
-    // reaches it, `kSeveral` where more do.
+    // Virtual-only starts can be shared below a level's gate. Bit zero marks
+    // a lexical start; the remaining bits name virtual tokens.
+    std::vector<std::uint16_t> virtuals;
+    for (std::uint16_t t = 0; t < _cfg.terminals.size(); ++t)
+      if (_cfg.terminals[t].body == kNoImage) virtuals.push_back(t);
+    std::vector<Bits> first(_cfg.nonterminals);
+    std::vector<std::vector<std::uint32_t>> callers(_cfg.nonterminals);
+    std::vector<std::uint32_t> work, begins;
+    // Ownership saturates after two levels meet, so shared starts are not
+    // walked again for each level that reaches them.
     constexpr std::uint32_t kSeveral = kNone - 1;
-    std::map<std::pair<std::uint32_t, Symbol>, std::vector<std::uint32_t>> opens;
-    std::vector<std::uint32_t> work, seen(_cfg.nonterminals, kNone), reached(_cfg.nonterminals, kNone);
+    std::map<std::pair<std::uint32_t, Symbol>, std::uint32_t> opens;
+    std::vector<std::uint32_t> reached(_cfg.nonterminals, kNone);
     std::vector<std::pair<std::uint32_t, std::uint32_t>> levels;
-    for (std::uint32_t x = 0; x < _cfg.infixes.size(); ++x)
-      for (const Infix::Level& told : _cfg.infixes[x].levels) {
-        const auto level = static_cast<std::uint32_t>(levels.size());
-        const std::uint32_t place = x << 1 | (told.group == Association::Prefix ? 1u : 0u);
-        levels.emplace_back(place, told.operators);
-        work.assign(1, told.operators);
-        seen[told.operators] = level;
+    struct Opening {
+      std::uint32_t first, last, guard;
+    };
+    struct Read {
+      std::map<Symbol, Opening> starts;
+      std::vector<std::uint32_t> nodes;
+    };
+    std::vector<Read> read(_cfg.infixes.size());
+    for (std::uint32_t x = 0; x < _cfg.infixes.size(); ++x) {
+      const auto& table = _cfg.infixes[x];
+      const auto base = static_cast<std::uint32_t>(levels.size());
+      for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
+        levels.emplace_back(x, l);
+        if (table.levels[l].group != Association::Postfix)
+          read[x].nodes.push_back(l);
+      }
+      for (std::uint32_t place = x << 1; place < (x << 1) + 2; ++place) {
+        for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
+          const auto& told = table.levels[l];
+          if ((told.group == Association::Prefix) != ((place & 1) != 0))
+            continue;
+          opens.emplace(std::pair(place, nonterminal(told.operators)),
+                        base + l);
+          work.push_back(told.operators);
+        }
         while (!work.empty()) {
           const std::uint32_t at = work.back();
           work.pop_back();
-          reached[at] = reached[at] == kNone ? level : kSeveral;
+          const auto owner = opens.at({place, nonterminal(at)});
+          const bool newStart = reached[at] == kNone;
+          if (reached[at] != owner)
+            reached[at] = reached[at] == kNone ? owner : kSeveral;
           for (const std::uint32_t p : _cfg.productionsOf[at])
             leading(p, [&](std::size_t, Symbol s) {
-              std::vector<std::uint32_t>& begun = opens[{place, s}];
-              if (begun.empty() || begun.back() != level) begun.push_back(level);
-              if (is_terminal(s) || seen[index_of(s)] == level) return;
-              seen[index_of(s)] = level;
-              work.push_back(index_of(s));
+              if (newStart) {
+                if (!is_terminal(s)) {
+                  callers[index_of(s)].push_back(at);
+                } else {
+                  if (first[at].words().empty())
+                    first[at] = Bits(virtuals.size() + 1);
+                  const auto bit =
+                      _cfg.terminals[s].body != kNoImage
+                          ? 0
+                          : 1 + std::ranges::lower_bound(virtuals, s) -
+                                virtuals.begin();
+                  if (!first[at].test(bit)) {
+                    first[at].set(bit);
+                    begins.push_back(at);
+                  }
+                }
+              }
+              const auto [begun, fresh] =
+                  opens.try_emplace(std::pair(place, s), owner);
+              if (!fresh) {
+                if (begun->second == owner || begun->second == kSeveral) return;
+                begun->second = kSeveral;
+              }
+              if (!is_terminal(s)) work.push_back(index_of(s));
             });
         }
       }
-    // Each level rewrites what it alone reaches, and its copies, and reads on
-    // through what levels share without rewriting it. Per level and token it
-    // opens with, the gap tests read just before, as a list of `tested`;
-    // kNone for none, or where walks read different ones.
+    }
+    while (!begins.empty()) {
+      const auto nt = begins.back();
+      begins.pop_back();
+      for (const auto caller : callers[nt]) {
+        if (first[caller].words().empty()) {
+          first[caller] = first[nt];
+          begins.push_back(caller);
+        } else if (first[caller].merge(first[nt])) {
+          begins.push_back(caller);
+        }
+      }
+    }
+    // Each level rewrites its own starts. A walk carries the conjunction of
+    // gap-only nonterminals in `tested`; kNone means no common guard.
     struct Walk {
       std::uint32_t nt, guard;
       bool own;
@@ -165,15 +219,28 @@ class Lowering {
       if (fresh) tested.push_back(std::move(list));
       return known->second;
     };
-    // Per nonterminal that reads nothing but tests of the gap, as `!gap::line`
-    // lowers or a rule of such tests does, those tests as a list of `tested`,
-    // where alternatives of them are one: a condition that reads them; kSeveral
-    // for any other. Each is told once, after what it reads, one met again while
-    // open reads more.
+    // Gap-only nonterminals keep their conjunction of tests in `tested`;
+    // alternatives stay whole. Other nonterminals are `kSeveral`.
     constexpr std::uint32_t kUntold = kNone - 2, kOpen = kNone - 3;
-    std::vector<std::uint32_t> gaps, ways, entered(_cfg.nonterminals, kNone);
-    // The conditions made so, by the production that reads them.
+    std::vector<std::uint32_t> gaps, ways, seen(_cfg.nonterminals, kNone),
+        entered(_cfg.nonterminals, kNone);
+    // One condition per nonterminal whose tests a node must negate.
     std::map<std::uint32_t, std::uint32_t> asks;
+    const auto ask = [&](std::uint32_t nt) {
+      const auto [known, fresh] = asks.try_emplace(nt);
+      if (!fresh) return known->second;
+      const auto read = static_cast<std::uint32_t>(_cfg.productions.size());
+      Production asked;
+      asked.lhs = _cfg.nonterminals++;
+      asked.rule = _cfg.productions[_cfg.productionsOf[nt].front()].rule;
+      asked.region = _cfg.productions[_cfg.productionsOf[nt].front()].region;
+      asked.rhs = {nonterminal(nt)};
+      asked.start = true;
+      _cfg.productions.push_back(std::move(asked));
+      _cfg.productionsOf.emplace_back(1, read);
+      _cfg.conditions.push_back(read);
+      return known->second = static_cast<std::uint32_t>(_cfg.conditions.size());
+    };
     const auto gaps_of = [&](std::uint32_t nt) {
       gaps.resize(_cfg.nonterminals, kUntold);
       for (std::vector<std::uint32_t> open{nt}; !open.empty();) {
@@ -190,7 +257,7 @@ class Lowering {
           std::uint32_t list = kSeveral;
           if (q.rhs.empty() && q.tests.size() == 1 && q.tests.front().ahead.empty() &&
               q.tests.front().condition == 0 && q.tests.front().gap != Test::Gap::any) {
-            list = and_then(kNone, std::span(&p, 1));
+            list = and_then(kNone, std::span(&at, 1));
           } else if (!q.rhs.empty() && q.tests.empty() &&
                      std::ranges::all_of(q.rhs, [&](Symbol s) {
                        return !is_terminal(s) && blank[index_of(s)];
@@ -207,22 +274,7 @@ class Lowering {
         if (open.size() != waits) continue;
         std::uint32_t list = ways.size() == 1 ? ways.front() : kSeveral;
         if (ways.size() > 1 && std::ranges::none_of(ways, [&](std::uint32_t w) { return w == kSeveral; })) {
-          // The copy that ends the operand where none holds negates it whole.
-          const auto read = static_cast<std::uint32_t>(_cfg.productions.size());
-          Production asked;
-          asked.lhs = _cfg.nonterminals++;
-          asked.rule = _cfg.productions[_cfg.productionsOf[at].front()].rule;
-          asked.region = _cfg.productions[_cfg.productionsOf[at].front()].region;
-          asked.rhs = {nonterminal(at)};
-          asked.start = true;
-          _cfg.productions.push_back(std::move(asked));
-          _cfg.productionsOf.emplace_back(1, read);
-          _cfg.conditions.push_back(read);
-          blank.push_back(false);
-          seen.push_back(kNone);
-          entered.push_back(kNone);
-          asks.emplace(read, static_cast<std::uint32_t>(_cfg.conditions.size()));
-          list = and_then(kNone, std::span(&read, 1));
+          list = and_then(kNone, std::span(&at, 1));
         }
         gaps[at] = list;
         open.pop_back();
@@ -231,16 +283,35 @@ class Lowering {
     };
     std::vector<Walk> walk;
     std::map<std::pair<Symbol, std::uint32_t>, Symbol> copies;
-    std::map<std::pair<std::uint32_t, Symbol>, std::uint32_t> guards;
-    std::ranges::fill(seen, kNone);
+    std::map<Symbol, std::uint32_t> guards;
     for (std::uint32_t level = 0; level < levels.size(); ++level) {
-      const std::uint32_t place = levels[level].first;
-      walk.assign(1, {levels[level].second, kNone, true});
-      seen[levels[level].second] = level;
-      entered[levels[level].second] = kNone;
+      const auto [x, l] = levels[level];
+      Infix::Level& told = _cfg.infixes[x].levels[l];
+      const std::uint32_t place =
+          x << 1 | (told.group == Association::Prefix ? 1u : 0u);
+      const bool behind =
+          !read[x].nodes.empty() && told.group != Association::Prefix;
+      const auto nt = told.operators;
+      guards.clear();
+      walk.assign(1, {nt, kNone, true});
+      seen[nt] = level;
+      entered[nt] = kNone;
+      const auto shared_start = [&](std::uint32_t nt) {
+        if (nt >= first.size() || !first[nt].any() || first[nt].test(0))
+          return false;
+        bool shared = true;
+        first[nt].each([&](std::size_t bit) {
+          shared &= opens.at({place, virtuals[bit - 1]}) == kSeveral;
+        });
+        if (shared && behind)
+          first[nt].each(
+              [&](std::size_t bit) { guards[virtuals[bit - 1]] = kNone; });
+        return shared;
+      };
       while (!walk.empty()) {
         const Walk from = walk.back();
         walk.pop_back();
+        if (shared_start(from.nt)) continue;
         for (std::size_t k = 0; k < _cfg.productionsOf[from.nt].size(); ++k) {
           const std::uint32_t p = _cfg.productionsOf[from.nt][k];
           std::uint32_t guard = from.guard;
@@ -251,12 +322,19 @@ class Lowering {
             }
             Symbol mine = s;
             const auto begun = opens.find({place, s});
+            if (!is_terminal(s) && shared_start(index_of(s))) {
+              guard = kNone;
+              return;
+            }
+            // Virtual tokens keep the identity the parser emits.
             const bool copied =
-                from.own && begun != opens.end() && begun->second.size() > 1 &&
-                (is_terminal(s) ||
-                 std::ranges::any_of(_cfg.productionsOf[index_of(s)], [&](std::uint32_t q) {
-                   return !_cfg.productions[q].rhs.empty();
-                 }));
+                from.own && begun != opens.end() && begun->second == kSeveral &&
+                (is_terminal(s) ? _cfg.terminals[s].body != kNoImage
+                                : std::ranges::any_of(
+                                      _cfg.productionsOf[index_of(s)],
+                                      [&](std::uint32_t q) {
+                                        return !_cfg.productions[q].rhs.empty();
+                                      }));
             if (copied) {
               const auto [copy, made] = copies.try_emplace({s, level});
               if (made) {
@@ -267,8 +345,8 @@ class Lowering {
                   seen.push_back(kNone);
                   entered.push_back(kNone);
                 } else {
-                  // A copy of a bracket or of the line's terminal holds its role too:
-                  // the newest terminal, it ends each list.
+                  // A copy of a bracket or of the line's terminal holds its
+                  // role too: the newest terminal, it ends each list.
                   for (auto* named : {&_cfg.opens, &_cfg.blocks, &_cfg.closes, &_cfg.lines})
                     if (std::ranges::binary_search(*named, s))
                       named->push_back(static_cast<std::uint16_t>(copy->second));
@@ -278,8 +356,10 @@ class Lowering {
               _cfg.productions[p].rhs[i] = mine;
             }
             if (is_terminal(mine)) {
-              const auto [known, fresh] = guards.try_emplace({level, mine}, guard);
-              if (!fresh && known->second != guard) known->second = kNone;
+              if (behind) {
+                const auto [known, fresh] = guards.try_emplace(mine, guard);
+                if (!fresh && known->second != guard) known->second = kNone;
+              }
               return;
             }
             const std::uint32_t n = index_of(mine);
@@ -296,46 +376,120 @@ class Lowering {
           });
         }
       }
+      if (!behind) continue;
+      bool gated = false;
+      for (const auto& [t, guard] : guards) {
+        const auto [entry, fresh] =
+            read[x].starts.try_emplace(t, Opening{l, l, guard});
+        entry->second.last = l;
+        if (!fresh && entry->second.guard != guard) entry->second.guard = kNone;
+        const auto begun = opens.find({place, t});
+        gated |= _cfg.terminals[t].body == kNoImage && begun != opens.end() &&
+                 begun->second == kSeveral;
+      }
+      if (!gated) continue;
+      Production gate;
+      gate.lhs = _cfg.nonterminals++;
+      gate.rule = _cfg.productions[told.node].rule;
+      gate.region = _cfg.productions[told.node].region;
+      auto& ahead = gate.tests.emplace_back().ahead;
+      for (const auto& [t, guard] : guards)
+        ahead.push_back(static_cast<std::uint16_t>(t));
+      told.operators = gate.lhs;
+      _cfg.productionsOf.emplace_back(
+          1, static_cast<std::uint32_t>(_cfg.productions.size()));
+      _cfg.productions.push_back(std::move(gate));
+      blank.push_back(true);
+      seen.push_back(kNone);
+      entered.push_back(kNone);
+      for (const auto p : _cfg.productionsOf[nt]) {
+        auto& q = _cfg.productions[p];
+        q.rhs.insert(q.rhs.begin(), nonterminal(told.operators));
+        if (!q.scopes.empty())
+          q.scopes.insert(q.scopes.begin(), q.scopes.front());
+        if (!q.takes.empty()) q.takes.insert(q.takes.begin(), kNone);
+      }
     }
-    // Per table and token behind an operand, its levels and the gap tests
-    // read before it at all of them. A node they take it from is reduced on
-    // it by a copy that holds where one of those tests fails.
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> at;
-    for (std::uint32_t x = 0; x < _cfg.infixes.size(); ++x)
-      for (std::uint32_t l = 0; l < _cfg.infixes[x].levels.size(); ++l) at.emplace_back(x, l);
-    std::map<std::pair<std::uint32_t, Symbol>, std::pair<std::vector<std::uint32_t>, std::uint32_t>> read;
-    for (const auto& [opened, guard] : guards) {
-      const auto [level, t] = opened;
-      if ((levels[level].first & 1) != 0) continue;
-      const auto [entry, fresh] = read.try_emplace({at[level].first, t});
-      entry->second.first.push_back(at[level].second);
-      if (fresh) entry->second.second = guard;
-      else if (entry->second.second != guard) entry->second.second = kNone;
-    }
+    // A node may finish before a guarded operator where its tests fail.
+    // Shared virtual starts test the whole operator, through the same copies.
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> past;
-    for (const auto& [where, opening] : read) {
-      const auto& [ms, guard] = opening;
-      if (guard == kNone) continue;
-      Infix& table = _cfg.infixes[where.first];
-      for (std::uint32_t l = 0; l < table.levels.size(); ++l) {
-        const auto [before, coming] = table.order(l, ms);
-        if (before || !coming) continue;
-        const auto [copy, made] = past.try_emplace({table.levels[l].node, guard});
-        if (made) {
-          Production node = _cfg.productions[table.levels[l].node];
-          node.tests.clear();
-          for (const std::uint32_t g : tested[guard]) {
-            const auto asked = asks.find(g);
-            Test& fails = node.tests.emplace_back(asked == asks.end() ? _cfg.productions[g].tests.front() : Test{});
-            if (asked != asks.end()) fails.condition = asked->second;
-            if (fails.condition != 0) fails.unless = !fails.unless;
-            else fails.gapUnless = !fails.gapUnless;
-          }
-          node.copyOf = table.levels[l].node;
-          copy->second = static_cast<std::uint32_t>(_cfg.productions.size());
-          _cfg.productions.push_back(std::move(node));
+    const auto finish = [&](Infix::Level& level, Symbol t,
+                            std::uint32_t guard) {
+      const auto [copy, made] = past.try_emplace({level.node, guard});
+      if (made) {
+        Production node = _cfg.productions[level.node];
+        node.tests.clear();
+        for (const std::uint32_t g : tested[guard]) {
+          const auto& of = _cfg.productionsOf[g];
+          const Production& q = _cfg.productions[of.front()];
+          Test& fails = node.tests.emplace_back();
+          if (of.size() == 1 && q.rhs.empty() && q.tests.size() == 1)
+            fails = q.tests.front();
+          else
+            fails.condition = ask(g);
+          if (fails.condition != 0)
+            fails.unless = !fails.unless;
+          else
+            fails.gapUnless = !fails.gapUnless;
         }
-        table.levels[l].past.emplace_back(static_cast<std::uint16_t>(where.second), copy->second);
+        node.copyOf = level.node;
+        copy->second = static_cast<std::uint32_t>(_cfg.productions.size());
+        _cfg.productions.push_back(std::move(node));
+      }
+      level.past.emplace_back(static_cast<std::uint16_t>(t), copy->second);
+    };
+    for (std::uint32_t x = 0; x < _cfg.infixes.size(); ++x) {
+      Infix& table = _cfg.infixes[x];
+      const auto& nodes = read[x].nodes;
+      if (nodes.empty()) continue;
+      std::vector<std::uint16_t> shared;
+      for (const auto& [t, opening] : read[x].starts) {
+        if (_cfg.terminals[t].body == kNoImage &&
+            opening.first != opening.last) {
+          shared.push_back(static_cast<std::uint16_t>(t));
+          continue;
+        }
+        if (opening.guard == kNone) continue;
+        for (auto at = std::ranges::lower_bound(nodes, opening.last);
+             at != nodes.end(); ++at) {
+          Infix::Level& level = table.levels[*at];
+          if (*at == opening.last &&
+              (level.group == Association::Left ||
+               (opening.first == *at && level.group != Association::Right)))
+            continue;
+          finish(level, t, opening.guard);
+        }
+      }
+      if (shared.empty()) continue;
+      std::uint32_t previous = kNone;
+      for (std::uint32_t l = 0; l <= nodes.back(); ++l) {
+        Infix::Level& level = table.levels[l];
+        const auto nt =
+            index_of(_cfg.productions[level.node]
+                         .rhs[level.group == Association::Prefix ? 0 : 1]);
+        const bool selected = level.operators != nt;
+        const auto extend = [&] {
+          if (previous == kNone) {
+            previous = nt;
+            return;
+          }
+          Production choice;
+          choice.rule = _cfg.productions[level.node].rule;
+          choice.region = _cfg.productions[level.node].region;
+          choice.tests.emplace_back().condition = ask(previous);
+          choice.tests.emplace_back().condition = ask(nt);
+          previous = choice.lhs = _cfg.nonterminals++;
+          _cfg.productionsOf.emplace_back(
+              1, static_cast<std::uint32_t>(_cfg.productions.size()));
+          _cfg.productions.push_back(std::move(choice));
+        };
+        if (selected && level.group != Association::Left) extend();
+        if (previous != kNone && level.group != Association::Postfix) {
+          const auto guard = and_then(kNone, std::span(&previous, 1));
+          for (const auto t : shared) finish(level, t, guard);
+        }
+        if (selected && level.group == Association::Left && l != nodes.back())
+          extend();
       }
     }
     for (Infix& table : _cfg.infixes)

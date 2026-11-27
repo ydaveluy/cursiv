@@ -739,7 +739,6 @@ int generate(GrammarImage& image, const LowerDesc& desc, const LanguageNames& na
       split_leads(cfg);
       const LexRivals rivals = lex_rivals(image, cfg, dfa);
       shadow_tests(cfg, rivals.reads);
-      bar_tests(cfg);
       const LrAutomaton automaton = build_lr1(cfg, rivals.takes, always, maxStates);
       return pack(image, cfg, std::move(dfa), rivals.takes, automaton);
     }();

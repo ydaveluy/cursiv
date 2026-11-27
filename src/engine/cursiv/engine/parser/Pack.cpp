@@ -960,8 +960,7 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
     }
     return it->second;
   };
-  for (std::uint32_t s = 0; s < out.states.size(); ++s) {
-    PackedState& state = out.states[s];
+  for (PackedState& state : out.states) {
     if (state.reduce != kNone) continue;
     // The end of input is no token of the lexer's: it tells no mode apart.
     // A state passes the trivia of the scopes its tokens are read under.
@@ -1080,7 +1079,7 @@ void lexer_modes(const Cfg& cfg, const LexDfa& dfa, const std::vector<RivalRow>&
       const std::uint16_t t = state.actions[i].terminal;
       if (next < reread.size() && reread[next].first == t &&
           (i + 1 == state.actions.size() || state.actions[i + 1].terminal != t)) {
-        auto& retry = actions.emplace_back(PackedAction{t, PackedAction::Kind::reread, reread[next++].second, s});
+        auto& retry = actions.emplace_back(PackedAction{t, PackedAction::Kind::reread, reread[next++].second});
         if (!peers[t].empty()) {
           const auto [it, fresh] = peerLists.try_emplace(peers[t], out.retryTerminals.size());
           if (fresh) out.retryTerminals.push_back(it->first);

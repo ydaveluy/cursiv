@@ -1104,14 +1104,15 @@ bool Machine::reads(std::uint32_t state, const char* from, Token tok, Indented i
     }
   };
   std::vector<Asked> asked;
-  // The condition's first token is the token that comes, as its states read
-  // that text; read otherwise, or written by a repair, the token itself, which
-  // they may refuse.
+  // Synthetic and replaced tokens keep their identity; lexical tokens are
+  // read in the condition's mode.
   const auto ask = [&](std::uint32_t root, const char* p, Token next, Indented level) {
     const auto s = stacks.state(root);
     const auto before = endReads;
     Token first = next;
-    if (const auto mode = t.stateMode[s]; mode != kNoToken && (next.head & kReplaced) == 0) {
+    if (const auto mode = t.stateMode[s]; mode != kNoToken && (next.head & kReplaced) == 0 &&
+        (next.terminal() == kEndOfInput ||
+         (next.terminal() != t.indentTerminal && next.terminal() != t.dedentTerminal))) {
       const Token read = observed(t.modes[mode].read(*this, src + next.begin(*this), mode));
       if (read.begin(*this) != next.begin(*this) || read.end == next.end) first = read;
     }

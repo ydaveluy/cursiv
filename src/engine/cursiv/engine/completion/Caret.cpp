@@ -230,8 +230,9 @@ class Stand : private Machine::CaretTests {
     const AstTables& ast = _language.ast;
     const auto replaced = text.substr(_cut, resume - _cut);
     _suffix = text.substr(resume);
+    CutLexer suffix(t, _suffix, _stop);
     _spliced.clear();
-    _prefix = _wordAt = 0;
+    _wordAt = 0;
     std::unordered_map<std::uint16_t, std::size_t> modeAt;
     for (const Root& root : _roots) {
       const std::uint32_t state = _stacks.state(root.node);
@@ -239,14 +240,20 @@ class Stand : private Machine::CaretTests {
       if (added) {
         Mode& mode = _modes.emplace_back(t.stateMode[state], std::vector<std::uint64_t>(t.followWords));
         if (mode.mode != kNoToken) {
-          if (!replaced.empty()) mode.replaced = read(text.substr(_cut), mode.mode);
+          Machine source(t, text, _builder.stream(), _stop);
+          source.ended = t.terminalCount;
+          if (!replaced.empty()) {
+            const auto begin = source.src + _cut;
+            const auto tok = source.walk(begin, mode.mode, 1, begin);
+            mode.replaced = {tok.terminal(), static_cast<std::size_t>(tok.end - begin)};
+          }
           if (_gap < _cut) {
-            mode.trivia = trivia_at(text, _gap, _cut, mode.mode);
+            mode.trivia = trivia_at(source, _gap, _cut, mode.mode);
             const auto* cut = text.data() + _cut;
             if (mode.trivia.end && mode.trivia.end > cut) {
               const auto width = t.word_width(cut, text.data() + text.size());
-              mode.inside = trivia_at(text.substr(0, _cut + width), mode.trivia.begin, _cut,
-                                      mode.mode).end != cut;
+              source.read_to(source.src + _cut + width, t.terminalCount);
+              mode.inside = trivia_at(source, mode.trivia.begin, _cut, mode.mode).end != cut;
             }
           }
         }
@@ -293,7 +300,7 @@ class Stand : private Machine::CaretTests {
           const auto fits_text = [&](std::uint32_t tests) {
             const auto [fit, fresh] = fits.try_emplace(tests);
             if (fresh)
-              fit->second = written(terminal, mode, root, tests, replaced);
+              fit->second = written(terminal, mode, root, tests, replaced, suffix);
             return fit->second;
           };
           if (!fits_text(root.tests)) continue;
@@ -399,41 +406,33 @@ class Stand : private Machine::CaretTests {
   }
 
   // Keep the longer side of an edit in place across candidates.
-  std::string_view splice(TextOffset from, std::string_view word) {
-    const std::size_t prefix = _cut - from;
+  std::string_view splice(std::string_view word) {
     const auto limit = std::min(kMaxDocument, _spliced.max_size());
-    const auto size = std::uint64_t{prefix} + word.size() + _suffix.size();
+    const auto size = std::uint64_t{_cut} + word.size() + _suffix.size();
     if (size > limit) throw std::length_error("completion text exceeds the document size limit");
-    auto at = std::max(_wordAt, prefix);
+    std::size_t at = _cut;
     const std::size_t room = limit - _suffix.size();
-    if (std::max(prefix, _prefix) <= _suffix.size()) {
+    if (_cut <= _suffix.size()) {
       const auto head = _spliced.empty() ? 0 : _spliced.size() - _suffix.size();
-      const auto need = prefix + word.size();
+      const auto need = _cut + word.size();
       const auto grown = std::min<std::uint64_t>(room, std::max<std::uint64_t>(need, 2 * std::uint64_t{head}));
       at = (head >= need ? head : grown) - word.size();
     }
-    at = std::min(at, room - word.size());
-    if (at != _wordAt) _prefix = 0;
-    _wordAt = at;
     if (_spliced.size() != at + word.size() + _suffix.size()) {
       _spliced.resize(at + word.size());
       _spliced.append(_suffix);
     }
-    char* begin = _spliced.data() + (at - prefix);
-    if (prefix > _prefix) {
-      _before.text().copy(begin, prefix - _prefix, from);
-      _prefix = prefix;
-    }
+    char* begin = _spliced.data() + (at - _cut);
+    if (at != _wordAt) _before.text().copy(begin, _cut);
+    _wordAt = at;
     word.copy(_spliced.data() + at, word.size());
     return {begin, static_cast<std::size_t>(size)};
   }
 
-  bool holds(std::uint32_t tests, std::string_view word, std::size_t length) {
-    if (!tests) return true;
-    Machine m(t, splice(0, word), _builder.stream(), _stop);
-    m.matchTies = _m.matchTies;
-    m.levels.base = &_m.levels;
+  bool holds(Machine& m, std::uint32_t tests, std::size_t length) {
+    unsigned checked = 0;
     for (; tests; tests = _tests[tests - 1].prior) {
+      if ((checked++ & 1023) == 0) throwIfCancelled(_stop);
       const auto& test = _tests[tests - 1];
       Token tok = test.token;
       tok.end = m.src + (tok.end - _m.src);
@@ -464,12 +463,6 @@ class Stand : private Machine::CaretTests {
     };
   };
 
-  // The longest token mode `mode` reads at the start of `text`: what as, and
-  // how many bytes.
-  struct Read {
-    std::uint16_t terminal;
-    std::size_t length;
-  };
   // The trivia that covers the byte before the caret: where it begins and
   // ends, a null end for none.
   struct TriviaSpan {
@@ -481,31 +474,13 @@ class Stand : private Machine::CaretTests {
   struct Mode {
     std::uint16_t mode;
     std::vector<std::uint64_t> takes;
-    Read replaced{kNoToken, 0};
+    struct Read {
+      std::uint16_t terminal = kNoToken;
+      std::size_t length = 0;
+    } replaced;
     TriviaSpan trivia;
     bool inside = false;
   };
-
-  [[nodiscard]] Read read(std::string_view text, std::uint16_t mode) {
-    Machine spliced(t, text, _builder.stream(), _stop);
-    spliced.read_to(spliced.end, t.terminalCount);
-    const Token tok = spliced.walk(spliced.src, mode, 1, spliced.src);
-    return {tok.terminal(), static_cast<std::size_t>(tok.end - spliced.src)};
-  }
-
-  // Follow ties and lexical retries to the token this stack actually shifts.
-  [[nodiscard]] bool elects(std::uint16_t terminal, Read& first, std::uint16_t mode,
-                            const Root& root, std::string_view word, bool current = false) {
-    if (first.terminal >= t.terminalCount) return false;
-    Machine m(t, current ? _before.text() : splice(0, word), _builder.stream(), _stop);
-    m.levels.base = &_m.levels;
-    const char* begin = m.src + _cut;
-    Token tok = m.walk(begin, mode, 1, begin);
-    if (!takes(m, _stacks, {root.node, 0, m.src + (root.at - _m.src), tok, root.indented},
-               2 * _stacks.state(root.node) + 1, 1, terminal, &tok)) return false;
-    first = {terminal, static_cast<std::size_t>(tok.end - begin)};
-    return true;
-  }
 
   // A token whose reading went on to the caret, from `begin` to `end`: the
   // stack and indentation that read it, and the one held before it.
@@ -520,17 +495,10 @@ class Stand : private Machine::CaretTests {
 
   // Re-read a held token in the edited text, from the stack and indentation
   // that read it before the edit.
-  [[nodiscard]] bool keeps_held(std::string_view word, const Holder& held) {
+  [[nodiscard]] bool keeps_held(Machine& m, const Holder& held) {
     const std::uint32_t state = _stacks.state(held.node);
     const std::uint16_t mode = t.stateMode[state];
     const bool indent = held.terminal == t.indentTerminal || held.terminal == t.dedentTerminal;
-    if (!t.retries[state] && !indent) {
-      const Read r = read(splice(held.begin, word), mode);
-      if (r.length != held.end - held.begin || r.terminal == t.terminalCount) return false;
-      if (r.terminal == held.terminal) return true;
-    }
-    Machine m(t, splice(0, word), _builder.stream(), _stop);
-    m.levels.base = &_m.levels;
     if (indent) {
       Indented level = held.indented;
       const Token token = m.indentation(m.src + held.from, level);
@@ -538,24 +506,30 @@ class Stand : private Machine::CaretTests {
     }
     const char* const start = m.src + held.begin;
     Token tok = m.walk(start, mode, 1, start);
+    if (!t.retries[state]) {
+      if (tok.end != m.src + held.end || tok.terminal() == t.terminalCount) return false;
+      if (tok.terminal() == held.terminal) return true;
+    }
     return takes(m, _stacks, {held.node, 0, m.src + held.from, tok, held.indented},
                  2 * state + 1, 1, held.terminal, &tok) && tok.end == m.src + held.end;
   }
 
   // The candidate's opening must leave the tokens read on to it, and the token or
   // trivia to its left, intact.
-  bool keeps_before(std::string_view word, const Mode& site, const Root& root) {
-    for (auto k = root.held; k != kNoStack; k = _readers[k].prior)
-      if (!keeps_held(word, _readers[k])) return false;
+  bool keeps_before(Machine& m, std::string_view word, const Mode& site, const Root& root) {
+    unsigned checked = 0;
+    for (auto k = root.held; k != kNoStack; k = _readers[k].prior) {
+      if ((checked++ & 1023) == 0) throwIfCancelled(_stop);
+      if (!keeps_held(m, _readers[k])) return false;
+    }
     if (site.trivia.end) {
-      const auto prefix = _cut - site.trivia.begin;
-      const auto edited = splice(site.trivia.begin, word);
       return (site.trivia.end != _before.text().data() + _cut &&
               !t.word_width(word.data(), word.data() + word.size())) ||
-             trivia_at(edited, 0, prefix, site.mode).end == edited.data() + prefix;
+             trivia_at(m, site.trivia.begin, _cut, site.mode).end == m.src + _cut;
     }
+    const char* start = m.src + _held;
     return !_loose || _held == _cut ||
-           read(splice(_held, word), t.modeFault[site.mode]).length <= _cut - _held;
+           m.walk(start, t.modeFault[site.mode], 1, start).end <= m.src + _cut;
   }
 
   // Whether a token before the one touching the caret is read by a lexer that
@@ -564,32 +538,103 @@ class Stand : private Machine::CaretTests {
     return end <= _m.src + _held && end > _m.src + begin && _atCut(begin) != 0;
   }
 
+  enum class Fit : std::uint8_t { refused, opaque, elected, fits };
+
+  // Shared byte prefixes retain one validation result per spelling and policy.
+  class Spellings {
+   public:
+    explicit Spellings(const CancellationToken& stop) : _stop(stop) {}
+
+    std::size_t add(std::size_t prior, char byte) {
+      const auto [at, fresh] = _known.try_emplace(std::pair{prior, byte}, _words.size());
+      if (fresh) _words.push_back({prior, _words[prior].length + 1, byte, {}});
+      return at->second;
+    }
+
+    std::size_t before(std::size_t word, std::size_t back) const {
+      if (_words[word].length <= back) return 0;
+      while (back--) word = _words[word].prior;
+      return word;
+    }
+
+    template<class Fits>
+    Fit test(std::size_t word, bool matcher, Fits&& fits) {
+      auto& known = _words[word].fits[matcher];
+      if (!known) {
+        const auto length = _words[word].length;
+        _text.resize(length);
+        _path.resize(length);
+        for (auto n = length; n && _path[n - 1] != word; --n) {
+          if ((n & 1023) == 0) throwIfCancelled(_stop);
+          _path[n - 1] = word;
+          _text[n - 1] = _words[word].byte;
+          word = _words[word].prior;
+        }
+        known = fits(_text, matcher);
+      }
+      return *known;
+    }
+
+   private:
+    struct Word {
+      std::size_t prior, length;
+      char byte;
+      std::array<std::optional<Fit>, 2> fits;
+    };
+    const CancellationToken& _stop;
+    std::vector<Word> _words{Word{}};
+    std::string _text;
+    std::vector<std::size_t> _path;
+    std::map<std::pair<std::size_t, char>, std::size_t> _known;
+  };
+
   // Whether a spelling can be written between the preceding text and the suffix.
   [[nodiscard]] CURSIV_NOINLINE bool written(std::uint16_t terminal, const Mode& site, const Root& root,
-                             std::uint32_t tests, std::string_view replaced) {
+                             std::uint32_t tests, std::string_view replaced, CutLexer& suffix) {
     const auto mode = site.mode;
     if (site.inside) return false;
-    const auto fits = [&](std::string_view word, Read alone, bool current = false) {
-      return (alone.terminal == terminal || elects(terminal, alone, mode, root, word, current)) &&
-             (!current || alone.length == word.size()) && holds(tests, word, alone.length) &&
-             keeps_before(word, site, root);
+    const auto fits = [&](std::string_view word, bool matcher = false, bool current = false) {
+      if (current && site.replaced.terminal >= t.terminalCount) return Fit::refused;
+      Machine m(t, current ? _before.text() : splice(word), _builder.stream(), _stop);
+      m.matchTies = _m.matchTies;
+      m.levels.base = &_m.levels;
+      if (matcher && !keeps_before(m, word, site, root)) return Fit::refused;
+      const char* begin = m.src + _cut;
+      Token tok = current && site.replaced.terminal == terminal
+                      ? token(_cut, begin + site.replaced.length, terminal)
+                      : m.walk(begin, mode, 1, begin);
+      if (tok.terminal() != terminal &&
+          (tok.terminal() >= t.terminalCount ||
+           !takes(m, _stacks, {root.node, 0, m.src + (root.at - _m.src), tok, root.indented},
+                  2 * _stacks.state(root.node) + 1, 1, terminal, &tok)))
+        return matcher ? Fit::opaque : Fit::refused;
+      const auto length = static_cast<std::size_t>(tok.end - begin);
+      if ((current && length != word.size()) || !holds(m, tests, length) ||
+          (!matcher && !keeps_before(m, word, site, root)))
+        return Fit::elected;
+      return Fit::fits;
     };
-    if (!replaced.empty() && fits(replaced, site.replaced, true)) return true;
+    if (!replaced.empty() && fits(replaced, false, true) == Fit::fits) return true;
     const auto words = _language.grammar.terminals[terminal].spellings;
     if (!words.empty()) return std::ranges::any_of(words, [&](std::string_view word) {
-      return fits(word, read(splice(_cut, word), mode));
+      return fits(word) == Fit::fits;
     });
+    Spellings spelled(_stop);
+    std::vector<std::uint32_t> room;
     bool opaque = false, elected = false;
     for (bool letters : {true, false})
-      if (spelling(terminal, site, root, letters, opaque, elected, fits)) return true;
-    return opaque && !elected && holds(tests, {}, 0);
+      if (spelling(terminal, site, root, letters, spelled, suffix, room, opaque, elected, fits))
+        return true;
+    if (!opaque || elected) return false;
+    Machine m(t, splice({}), _builder.stream(), _stop);
+    m.matchTies = _m.matchTies;
+    m.levels.base = &_m.levels;
+    return holds(m, tests, 0);
   }
 
   // The trivia covering the last byte before the cut, when the whole gap is trivia.
-  [[nodiscard]] TriviaSpan trivia_at(std::string_view text, TextOffset from, TextOffset cut,
+  [[nodiscard]] TriviaSpan trivia_at(Machine& m, TextOffset from, TextOffset cut,
                                 std::uint16_t mode) {
-    Machine m(t, text, _builder.stream(), _stop);
-    m.ended = t.terminalCount;
     for (const char* p = m.src + from; p < m.src + cut;) {
       const Token tok = m.walk(p, mode, 1, p);
       if (tok.end <= p || tok.terminal() >= t.terminalCount ||
@@ -601,16 +646,59 @@ class Stand : private Machine::CaretTests {
   }
 
   // Try DFA spellings against the lexer and the predicates pending at the caret.
-  template<class Fits>
+  template <class Fits>
   bool spelling(std::uint16_t terminal, const Mode& site, const Root& root,
-                bool letters, bool& opaque, bool& elected, Fits&& fits) {
+                bool letters, Spellings& spelled, CutLexer& suffix,
+                std::vector<std::uint32_t>& room, bool& opaque, bool& elected, Fits&& fits) {
     const auto mode = site.mode;
     auto& sample = _samples[letters];
     if (!sample) sample = samples(t, letters);
-    const LexBlocks win = t.modes[mode].win;
+    const auto solo = t.tied ? t.tied[terminal].solo : kNoToken;
+    const LexBlocks win = t.modes[solo == kNoToken ? mode : solo].win;
+    struct End {
+      std::uint16_t terminal = kNoToken;
+      std::uint8_t back = 0;
+      LexTest test = LexTest::none;
+      bool tied = false;
+    };
+    const auto ending = [&](std::uint16_t state, bool eof) {
+      const auto accept = t.lexStates[state].accept;
+      auto how = win.at(0, accept);
+      if (how > kWinNone && t.resolutions[how & ~kWinResolved].test == LexTest::match)
+        how = t.modes[mode].win.at(0, accept);
+      End out;
+      out.tied = how != kWinNone && t.lexTieEnds && t.inSet(t.lexTieEnds[accept], terminal);
+      for (; how != kWinNone;) {
+        if (how < kWinNone) {
+          out.terminal = eof ? kNoToken : how;
+          out.back = 0;
+          out.test = LexTest::none;
+          return out;
+        }
+        const auto& r = t.resolutions[how & ~kWinResolved];
+        out.back = r.back;
+        out.test = r.test;
+        if (r.token == terminal && (!eof || (r.test == LexTest::eof && r.back <= _suffix.size()))) {
+          out.terminal = terminal;
+          return out;
+        }
+        how = r.otherwise;
+      }
+      return out;
+    };
+    const auto reachable = [&](std::uint16_t state) {
+      return t.inSet(t.lexStates[state].reach, terminal);
+    };
+    const auto tried = [&](std::size_t word, bool matcher) {
+      const auto result = spelled.test(word, matcher, fits);
+      opaque |= result == Fit::opaque;
+      elected |= result == Fit::elected;
+      return result == Fit::fits;
+    };
     // Keep paths that extend the text before the caret differently in any mode,
-    // its token's mode telling the last acceptance. Where that mode alone reads the
-    // token again, a plain token of it that runs into the spelling ends the path.
+    // its token's mode telling the last acceptance. Where that mode alone reads
+    // the token again, a plain token of it that runs into the spelling ends the
+    // path.
     const TextOffset from = site.trivia.end ? site.trivia.begin : _held;
     std::uint16_t left = 0, leftMode = mode;
     bool alone = false;
@@ -622,7 +710,8 @@ class Stand : private Machine::CaretTests {
       } else if (!site.trivia.end) {
         const Holder& held = _readers[root.held];
         leftMode = t.stateMode[_stacks.state(held.node)];
-        alone = !t.retries[_stacks.state(held.node)] && held.terminal != t.indentTerminal &&
+        alone = !t.retries[_stacks.state(held.node)] &&
+                held.terminal != t.indentTerminal &&
                 held.terminal != t.dedentTerminal;
       }
       if (leftMode == kNoToken) left = 0;
@@ -642,62 +731,34 @@ class Stand : private Machine::CaretTests {
       if (_readers[k].begin < _held) sides.push_back(_atCut(_readers[k].begin));
     std::ranges::sort(sides);
     sides.erase(std::unique(sides.begin(), sides.end()), sides.end());
+    const auto opening = group(sides) | left;
+    std::unordered_map<std::uint64_t, std::uint64_t> advanced;
+    bool needsEnd = false;
     for (const auto& entry : _queue) _reached[entry.state] = 0;
     if (_reached.size() < 2) _reached.resize(2);
-    _reached[1] = 1;
-    _queue.assign(1, {0, group(sides) | left, 1, 0});
+    // The empty seed is not a spelling; keep its first nonempty return.
+    _reached[1] = 0;
+    _queue.assign(1, {0, opening, 1});
     std::set<std::pair<std::uint16_t, std::uint64_t>> other;
     for (std::size_t next = 0; next < _queue.size(); ++next) {
       if ((next & 63) == 0) throwIfCancelled(_stop);
       const auto s = _queue[next].state;
       const auto context = _queue[next].context;
-      // Whether one of the readings of the state is the terminal. One tested at
-      // the end of the text ends no spelling, tied or not, that text follows.
-      bool ends = false, later = false;
-      bool matcher = false;
-      unsigned back = 0;
-      const auto accept = t.lexStates[s].accept;
-      const auto ending = win.at(0, accept);
-      for (std::uint16_t how = ending; how != kWinNone && !ends;) {
-        if (how < kWinNone) {
-          ends = how == terminal;
-          back = 0;
-          break;
-        }
-        const LexResolution& r = t.resolutions[how & ~kWinResolved];
-        const bool waits = r.token == terminal && r.test == LexTest::eof && !_suffix.empty();
-        later = later || waits;
-        ends = r.token == terminal && !waits;
-        matcher = ends && r.test == LexTest::match;
-        back = r.back;
-        how = r.otherwise;
-      }
+      const auto end = ending(s, false);
+      const bool ends = end.terminal == terminal;
+      const bool eof = ends && end.test == LexTest::eof && !_suffix.empty();
+      const bool firstEnd = !needsEnd;
+      needsEnd |= eof;
+      const bool matcher = ends && end.test == LexTest::match;
       if (s == 1 && matcher) opaque = true;
-      if (s != 1 && (ends || (!later && ending != kWinNone && t.lexTieEnds &&
-                             t.inSet(t.lexTieEnds[accept], terminal)))) {
-        std::string found;
-        for (auto at = next; at; at = _queue[at].prior) {
-          if ((found.size() & 1023) == 1023) throwIfCancelled(_stop);
-          found.push_back(_queue[at].byte);
-        }
-        std::ranges::reverse(found);
-        if (found.size() > back) found.resize(found.size() - back);
-        else found.clear();
-        if (!found.empty() && (!matcher || keeps_before(found, site, root))) {
-          opaque |= matcher;
-          Read alone = read(splice(_cut, found), mode);
-          if (alone.terminal == terminal || elects(terminal, alone, mode, root, found)) {
-            elected = true;
-            if (fits(found, alone)) return true;
-          }
-        }
-      }
+      if (s != 1 && (ends || end.tied) && (!eof || firstEnd))
+        if (const auto word = spelled.before(_queue[next].word, end.back);
+            word && tried(word, matcher))
+          return true;
       // Only through the states past which the terminal can still end.
       for (unsigned c = 0; c < t.lexClassCount; ++c) {
         const std::uint16_t to = t.transition(s, c);
-        if (to == 0 || (*sample)[c] < 0) continue;
-        const std::uint64_t* const reach = t.setOf(t.lexStates[to].reach);
-        if (((reach[terminal / 64] >> (terminal % 64)) & 1) == 0) continue;
+        if (to == 0 || (*sample)[c] < 0 || !reachable(to)) continue;
         auto after = context;
         if (const auto side = static_cast<std::uint16_t>(context)) {
           const auto state = t.transition(side, c);
@@ -707,23 +768,75 @@ class Stand : private Machine::CaretTests {
           after = (context & ~std::uint64_t{0xFFFFFFFF}) | last | state;
         }
         if (const auto prior = context >> 32) {
-          sides = *saved[prior - 1];
-          for (auto& word : sides) {
-            const auto state = t.transition(static_cast<std::uint16_t>(word), c);
-            const auto accept = t.lexStates[state].accept;
-            word = (accept ? std::uint32_t{accept} << 16 : word & 0xFFFF0000u) | state;
+          const auto [at, fresh] = advanced.try_emplace(prior << 8 | c);
+          if (fresh) {
+            sides = *saved[prior - 1];
+            unsigned checked = 0;
+            for (auto& word : sides) {
+              if ((checked++ & 1023) == 0) throwIfCancelled(_stop);
+              const auto state = t.transition(static_cast<std::uint16_t>(word), c);
+              const auto accept = t.lexStates[state].accept;
+              word = (accept ? std::uint32_t{accept} << 16 : word & 0xFFFF0000u) | state;
+            }
+            at->second = group(sides);
           }
-          after = group(sides) | static_cast<std::uint32_t>(after);
+          after = at->second | static_cast<std::uint32_t>(after);
         }
         if (to >= _reached.size()) _reached.resize(to + 1);
         const auto first = _reached[to];
-        if (first && (_queue[first - 1].context == after || !other.insert({to, after}).second))
+        if (first && (_queue[first - 1].context == after || !other.emplace(to, after).second))
           continue;
         const char b = static_cast<char>((*sample)[c]);
-        if (!letters && !left && s == 1 && !keeps_before({&b, 1}, site, root)) continue;
+        if (!letters && !left && s == 1) {
+          Machine m(t, splice({&b, 1}), _builder.stream(), _stop);
+          m.levels.base = &_m.levels;
+          if (!keeps_before(m, {&b, 1}, site, root)) continue;
+        }
         if (!first) _reached[to] = _queue.size() + 1;
-        _queue.push_back({next, after, to, b});
+        const auto word = spelled.add(_queue[next].word, b);
+        _queue.push_back({word, after, to});
       }
+    }
+    if (!needsEnd) return false;
+    // A finite path must leave room for the retained suffix. Cycles have no
+    // length bound; each DFA state and successor list is visited once.
+    if (room.empty()) {
+      constexpr std::uint32_t active = ~std::uint32_t{0}, unbounded = active - 1;
+      struct Bound { std::uint16_t state; std::uint32_t next = 0, length = 0; };
+      room.resize(t.lexStates.size());
+      std::vector<Bound> work{{1}};
+      room[1] = active;
+      unsigned checked = 0;
+      while (!work.empty()) {
+        if ((checked++ & 1023) == 0) throwIfCancelled(_stop);
+        auto& here = work.back();
+        const auto* list = t.lexLeads + t.lexLeadAt[here.state];
+        if (here.next != *list) {
+          const auto to = list[1 + here.next++];
+          if (!to || !reachable(to)) continue;
+          if (!room[to]) {
+            --here.next;
+            room[to] = active;
+            work.push_back({to});
+            continue;
+          }
+          here.length = room[to] == active || room[to] == unbounded
+                            ? unbounded : std::max(here.length, room[to]);
+          continue;
+        }
+        room[here.state] = here.length == unbounded ? unbounded : here.length + 1;
+        work.pop_back();
+      }
+    }
+    if (room[1] <= _suffix.size() + 1) return false;
+    // The fixed suffix is read, not generated. Its walks share CutLexer results;
+    // no suffix position is added to the spelling search's state.
+    for (std::size_t next = 1; next < _queue.size(); ++next) {
+      if ((next & 63) == 0) throwIfCancelled(_stop);
+      const auto& prefix = _queue[next];
+      if (room[prefix.state] <= _suffix.size()) continue;
+      const auto end = suffix(0, prefix.state);
+      if (ending(end, true).terminal == terminal && tried(prefix.word, false)) return true;
     }
     return false;
   }
@@ -766,16 +879,15 @@ class Stand : private Machine::CaretTests {
   bool _capture = false;
   std::vector<PendingTest> _tests;
   std::string _spliced;
-  std::size_t _prefix = 0, _wordAt = 0;
+  std::size_t _wordAt = 0;
   std::string_view _suffix;
   Cactus _stacks;
   std::vector<Holder> _readers;
   std::vector<Root> _roots;
   struct Spelling {
-    std::size_t prior;
+    std::size_t word;
     std::uint64_t context;
     std::uint16_t state;
-    char byte;
   };
   std::array<std::optional<std::array<int, 256>>, 2> _samples;
   std::vector<std::size_t> _reached;

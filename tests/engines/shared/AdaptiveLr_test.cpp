@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -14,6 +16,7 @@
 #include "cursiv/engine/grammar/View.hpp"
 #include "cursiv/engine/grammar/WritesOnce.hpp"
 #include "cursiv/engine/parser/EmitDrive.hpp"
+#include "engines/shared/ConformanceGrammars.hpp"
 
 namespace {
 
@@ -525,9 +528,173 @@ std::size_t split_size(unsigned length) {
   return symbols;
 }
 
+// Distinct callers converge after the first token of one long continuation.
+std::pair<std::size_t, std::size_t> implied_context_size(unsigned length, bool binary = false) {
+  Cfg cfg;
+  cfg.nonterminals = 5;
+  cfg.terminals.resize(binary ? 8 : 5 + 2 * length);
+  for (std::size_t t = 1; t < cfg.terminals.size(); ++t)
+    cfg.terminals[t].body = 0;
+  cfg.regions.emplace_back();
+  const auto add = [&](std::uint32_t lhs, std::vector<Symbol> rhs) {
+    Production p;
+    p.lhs = lhs;
+    p.rhs = std::move(rhs);
+    cfg.productions.push_back(std::move(p));
+  };
+  add(0, {nonterminal(1)});
+  for (unsigned i = 0; i < length; ++i) {
+    std::vector<Symbol> prefix;
+    if (binary) {
+      for (auto bit = std::bit_width(length - 1); bit-- > 0;)
+        prefix.push_back(5 + (i >> bit & 1));
+    } else {
+      prefix.push_back(5 + 2 * i);
+    }
+    prefix.push_back(nonterminal(2));
+    prefix.push_back(binary ? 7 : 6 + 2 * i);
+    add(1, std::move(prefix));
+  }
+  std::vector<Symbol> continuation(length, 1);
+  continuation.push_back(nonterminal(3));
+  add(2, std::move(continuation));
+  add(3, {2});
+  add(3, {nonterminal(4), nonterminal(3), 3});
+  add(4, {4});
+  add(4, {});
+  cfg.productions.back().implied = true;
+  cfg.productions.back().tests.emplace_back().gap = Test::Gap::empty;
+  cfg.productionsOf.resize(cfg.nonterminals);
+  for (std::uint32_t p = 0; p < cfg.productions.size(); ++p)
+    cfg.productionsOf[cfg.productions[p].lhs].push_back(p);
+  split_leads(cfg);
+  std::size_t input = 0;
+  for (const auto& p : cfg.productions) input += p.rhs.size();
+  const auto lr = build_lr1(cfg, std::vector<RivalRow>(cfg.terminals.size()),
+                            Bits(cfg.terminals.size()));
+  std::size_t symbols = 0;
+  for (const auto& p : cfg.productions) symbols += p.rhs.size();
+  CHECK(symbols <= 3 * input);
+  return {symbols, lr.states.size()};
+}
+
+void check_rebuilding(Cfg& cfg, const std::vector<RivalRow>& rivals, const Bits& trivia) {
+  const auto copy_of = [](const Cfg& from) {
+    Cfg copy;
+    copy.terminals = from.terminals;
+    copy.regions = from.regions;
+    copy.nonterminals = from.nonterminals;
+    copy.productions = from.productions;
+    copy.productionsOf = from.productionsOf;
+    copy.conditions = from.conditions;
+    copy.openings = from.openings;
+    copy.recordInputs = from.recordInputs;
+    copy.infixes = from.infixes;
+    copy.turnContexts = from.turnContexts;
+    copy.entries = from.entries;
+    copy.rows = from.rows;
+    return copy;
+  };
+  auto retry = copy_of(cfg);
+  const auto first = build_lr1(cfg, rivals, trivia);
+  const auto normalized = cfg.productions.size();
+  auto copy = copy_of(cfg);
+  const auto row = [](const LrState& state) {
+    return std::tie(state.shifts, state.reduces, state.gotos, state.kernel,
+                    state.named, state.follow, state.barred, state.scopes,
+                    state.governs, state.behind, state.doubted);
+  };
+  for (auto* prepared : {&cfg, &copy, &retry}) {
+    if (prepared == &retry) {
+      bool refused = false;
+      try {
+        (void)build_lr1(retry, rivals, trivia, 1);
+      } catch (const Refused&) {
+        refused = true;
+      }
+      CHECK(refused);
+      if (!cfg.turnContexts) CHECK(retry.openings.size() == cfg.openings.size());
+    }
+    const auto again = build_lr1(*prepared, rivals, trivia);
+    CHECK(prepared->productions.size() == normalized);
+    CHECK(first.conditions == again.conditions);
+    CHECK(first.states.size() == again.states.size());
+    for (std::size_t s = 0; s < std::min(first.states.size(), again.states.size()); ++s)
+      CHECK(row(first.states[s]) == row(again.states[s]));
+  }
+}
+
+// R -> a | test_i R suffix_i; positive tests have false marker arms.
+void rebuilding_preserves_opening_slots() {
+  for (const auto [markers, positive] :
+       {std::pair{1u, 0u}, {1u, 1u}, {3u, 2u}, {3u, 5u}}) {
+    Cfg cfg;
+    cfg.nonterminals = 3 + markers;
+    cfg.terminals.resize(3 + 2 * markers);
+    for (auto& t : cfg.terminals) t.body = 0;
+    cfg.regions.emplace_back();
+    const auto add = [&](std::uint32_t lhs, std::vector<Symbol> rhs) {
+      auto& p = cfg.productions.emplace_back();
+      p.lhs = lhs;
+      p.rhs = std::move(rhs);
+    };
+    add(0, {nonterminal(1)});
+    add(1, {nonterminal(2)});
+    add(1, {2 + markers, nonterminal(3), 1});
+    add(2, {1});
+    for (unsigned i = 0; i < markers; ++i) {
+      add(2, {nonterminal(3 + i), nonterminal(2), 2 + i});
+      add(3 + i, {});
+      auto& test = cfg.productions.back().tests.emplace_back();
+      test.ahead = {static_cast<std::uint16_t>(3 + markers + i)};
+      test.unless = (positive >> i & 1) == 0;
+    }
+    cfg.productionsOf.resize(cfg.nonterminals);
+    for (std::uint32_t p = 0; p < cfg.productions.size(); ++p)
+      cfg.productionsOf[cfg.productions[p].lhs].push_back(p);
+    split_leads(cfg);
+    check_rebuilding(cfg, std::vector<RivalRow>(cfg.terminals.size()), Bits(cfg.terminals.size()));
+    CHECK(!cfg.turnContexts);
+    CHECK(cfg.openings.size() == markers);
+    std::uint32_t depth = 0;
+    for (const auto& opening : cfg.openings)
+      for (const auto& slot : opening) depth = std::max(depth, slot.depth + 1);
+    CHECK(depth == markers);
+    // The same test still becomes a bar at an ordinary, non-marker site.
+    if ((positive & 1) == 0) {
+      const auto& plain = cfg.productions[2];
+      CHECK((plain.rhs == std::vector<Symbol>{2 + markers, 1}));
+      CHECK(plain.bars.size() == 1 && plain.bars.front().first == 1);
+    }
+  }
+}
+
+struct ImpliedExpressions : tconformance::ImpliedPrefix {
+  using entry = Expression;
+};
+
+void rebuilding_implied_contexts_preserves_infix_decisions() {
+  auto image = grammar_image<View<ImpliedExpressions>>();
+  auto cfg = lower(image, kLowerDesc<ImpliedExpressions>);
+  optimize(cfg);
+  LexAutomatonBuilder lexer(image);
+  for (std::uint16_t t = 1; t < cfg.terminals.size(); ++t)
+    lexer.add(t, cfg.terminals[t]);
+  const auto dfa = lexer.build(cfg.terminals.size());
+  const auto rivals = lex_rivals(image, cfg, dfa);
+  Bits trivia(cfg.terminals.size());
+  for (std::size_t t = 1; t < cfg.terminals.size(); ++t)
+    if (cfg.terminals[t].trivia != cursiv::engine::Trivia::none) trivia.set(t);
+  split_leads(cfg);
+  shadow_tests(cfg, rivals.reads);
+  const auto original = cfg.productions.size();
+  check_rebuilding(cfg, rivals.takes, trivia);
+  CHECK(cfg.productions.size() > original);
+}
+
 void a_ceiling_refines_choices_without_exceeding_it() {
   constexpr unsigned copies = 8;
-  const Cfg cfg = choices(copies);
+  Cfg cfg = choices(copies);
   const std::vector<RivalRow> rivals(cfg.terminals.size());
   const Bits trivia(cfg.terminals.size());
   const auto full = build_lr1(cfg, rivals, trivia);
@@ -662,6 +829,16 @@ int main() {
   CHECK((plain_tables<SectionHost<Mixed, G::lit<"az">>>().warnings.empty()));
   barring_a_terminal_preserves_the_kernel_origins();
   CHECK(split_size(128) <= 2 * split_size(64));
+  const auto contextSmall = implied_context_size(64);
+  const auto contextMedium = implied_context_size(128);
+  const auto contextLarge = implied_context_size(256);
+  CHECK(contextMedium.first <= 2 * contextSmall.first);
+  CHECK(contextMedium.second <= 2 * contextSmall.second);
+  CHECK(contextLarge.first <= 2 * contextMedium.first);
+  CHECK(contextLarge.second <= 2 * contextMedium.second);
+  for (const auto n : {64u, 128u, 256u, 512u}) (void)implied_context_size(n, true);
+  rebuilding_implied_contexts_preserves_infix_decisions();
+  rebuilding_preserves_opening_slots();
   a_ceiling_refines_choices_without_exceeding_it();
   a_shared_reader_needs_a_terminal_that_separates_its_arms();
   CHECK(a_cycle_of_rules_is_refused<Cycles::SilentList>());
