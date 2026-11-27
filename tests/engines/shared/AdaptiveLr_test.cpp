@@ -274,9 +274,9 @@ void rejects_second_write(std::string_view message) {
   }
 }
 
-// A chain of rules, each taking over the node of the one before and writing a
-// member of its own into it, is checked in time linear in its length.
-bool a_chain_of_rules_is_checked_once_each() {
+// Each inherited set shares its unchanged blocks, even when adjacent rules
+// write properties whose numbers are far apart.
+void a_chain_of_rules_shares_its_inherited_writes() {
   constexpr std::size_t n = 3000;
   std::vector<cursiv::engine::MemberDesc> members(n);
   std::vector<cursiv::engine::RowDesc> rows(n);
@@ -290,7 +290,7 @@ bool a_chain_of_rules_is_checked_once_each() {
   for (std::size_t i = 0; i < n; ++i) {
     rows[i].member = &members[i];
     rowList.push_back(&rows[i]);
-    flags[i] = {.kind = ImageKind::flag, .count = 1, .children = words, .row = &rows[i]};
+    flags[i] = {.kind = ImageKind::flag, .count = 1, .children = words, .row = &rows[997 * i % n]};
     if (i > 0) refs[i] = {.kind = ImageKind::ref, .rule = &rules[i - 1]};
     parts[i] = {&refs[i], &flags[i]};
     seqs[i] = {.kind = ImageKind::seq, .count = 2, .children = parts[i].data()};
@@ -298,9 +298,18 @@ bool a_chain_of_rules_is_checked_once_each() {
     rules[i].stage = &stages[i];
   }
   GrammarImage image;
-  const auto start = std::chrono::steady_clock::now();
-  check_writes_once(image, {rowList, &rules[n - 1]});
-  return std::chrono::steady_clock::now() - start < std::chrono::seconds(1);
+  const auto branches = check_writes_once(image, {rowList, &rules.back()});
+  CHECK(branches <= 3 * n * (1 + std::bit_width((n - 1) / 64)));
+
+  flags.back().row = flags[1].row;
+  members[997].name = "repeated";
+  GrammarImage repeated;
+  try {
+    check_writes_once(repeated, {rowList, &rules.back()});
+    CHECK(false);
+  } catch (const Refused& error) {
+    CHECK(std::string_view(error.what()).find("'repeated' twice") != std::string_view::npos);
+  }
 }
 
 template <auto Word>
@@ -813,7 +822,7 @@ int main() {
   rejects_second_write<UnorderedWrites>("'marked' twice");
   rejects_second_write<AliasedOperands>("'child' twice");
   rejects_second_write<SectionWrites>("'marked' twice");
-  CHECK(a_chain_of_rules_is_checked_once_each());
+  a_chain_of_rules_shares_its_inherited_writes();
   using G = cursiv::GrammarSpec;
   CHECK(!embedded_word_overlaps_close<G::lit<"z">>());
   CHECK(embedded_word_overlaps_close<G::lit<"énd!word">>());

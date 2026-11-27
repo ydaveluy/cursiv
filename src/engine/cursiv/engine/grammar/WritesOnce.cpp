@@ -1,9 +1,9 @@
 #include "cursiv/engine/grammar/WritesOnce.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
-#include <map>
-#include <memory>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -17,47 +17,7 @@ using detail::Descent;
 
 namespace {
 
-// Only occupied words are stored. A set contained in one word needs no allocation.
-struct Members {
-  std::uint64_t bits = 0;
-  unsigned first = 0;
-  using Blocks = std::map<unsigned, std::uint64_t>;
-  std::unique_ptr<Blocks> rest;
-
-  Members clone() const {
-    Members copy{bits, first, nullptr};
-    if (rest) copy.rest = std::make_unique<Blocks>(*rest);
-    return copy;
-  }
-
-  std::uint64_t get(unsigned block) const {
-    if (block == first) return bits;
-    if (!rest) return 0;
-    const auto it = rest->find(block);
-    return it == rest->end() ? 0 : it->second;
-  }
-  bool add(unsigned block, std::uint64_t mask) {
-    if (!bits) first = block;
-    if (block != first && !rest) rest = std::make_unique<Blocks>();
-    auto& word = block == first ? bits : (*rest)[block];
-    const bool grew = (mask & ~word) != 0;
-    word |= mask;
-    return grew;
-  }
-  bool insert(unsigned id) { return add(id / 64, std::uint64_t{1} << (id % 64)); }
-  bool contains(unsigned id) const { return (get(id / 64) >> (id % 64)) & 1; }
-
-  void each(auto&& visit) const {
-    if (bits) visit(first, bits);
-    if (rest)
-      for (const auto& [block, mask] : *rest) visit(block, mask);
-  }
-  bool merge(const Members& other) {
-    bool grew = false;
-    other.each([&](unsigned block, std::uint64_t mask) { grew |= add(block, mask); });
-    return grew;
-  }
-};
+using Members = std::uint64_t;
 
 class Check {
  public:
@@ -65,17 +25,28 @@ class Check {
     for (const RowDesc* row : desc.rows)
       if (row->member && _number.try_emplace(row->member, _names.size()).second)
         _names.push_back(row->member->name);
+    _single.resize(_names.size());
+    for (std::size_t i = 0; i < std::min<std::size_t>(64, _single.size()); ++i)
+      _single[i] = Members{1} << i;
+    for (std::size_t width = 64; width < _single.size(); width *= 2) {
+      for (std::size_t i = 0; i < width; ++i) {
+        const auto one = _single[i];
+        _single[i] = branch_id({one, 0});
+        if (i + width < _single.size()) _single[i + width] = branch_id({0, one});
+      }
+      ++_depth;
+    }
     schedule(_image.entry_rule(_image.rule(*desc.entry)));
   }
 
   // A rule waits under the rules it meets first, and is read again when one it
   // calls is found to write more into the node it hands over.
-  void run() {
+  std::size_t run() {
     while (!_todo.empty()) {
       _rule = _todo.back();
       const std::size_t waiting = _todo.size();
       const ImageStageDesc& stage = _image.stage(_rule);
-      Members wrote;
+      Members wrote = 0;
       switch (stage.kind) {
         case ImageRuleKind::node:
           wrote = detail::descend(
@@ -86,10 +57,10 @@ class Check {
           // members written.
           const std::uint32_t primary = _image.rule(*stage.primary);
           wrote = made(primary);
-          Members operands;
+          Members operands = 0;
           unsigned twice = none;
           for (const void* row : {stage.leftRow, stage.rightRow})
-            if (const auto m = member(row); m != none && !operands.insert(m)) twice = m;
+            if (const auto m = member(row); m != none && !merge(operands, _single[m])) twice = m;
           for (std::uint32_t l = 0; l < stage.levelCount; ++l) {
             // A binary level writes both operands; a prefix or postfix level
             // builds its own node: its operand member, then its operator's.
@@ -97,12 +68,12 @@ class Check {
             const bool unary = group == Association::Prefix || group == Association::Postfix;
             const unsigned operand = member(stage.levels[l].operandRow);
             if (!unary && twice != none) refuse(twice, "twice");
-            if (!unary) wrote.merge(operands);
-            if (operand != none) wrote.insert(operand);
+            if (!unary) merge(wrote, operands);
+            if (operand != none) merge(wrote, _single[operand]);
             for (std::uint32_t o = 0; o < stage.levels[l].count; ++o)
               if (const auto m = member(stage.levels[l].ops[o].row); m != none) {
-                if (unary ? m == operand : operands.contains(m)) refuse(m, "twice");
-                wrote.insert(m);
+                if (unary ? m == operand : overlap(operands, _single[m]) != none) refuse(m, "twice");
+                merge(wrote, _single[m]);
               }
           }
           break;
@@ -115,9 +86,10 @@ class Check {
       _todo.pop_back();
       _queued[_rule] = false;
       Members& known = slot(_made, _rule);
-      if (!known.merge(wrote)) continue;
+      if (!merge(known, wrote)) continue;
       for (const std::uint32_t user : slot(_users, _rule)) schedule(user);
     }
+    return _branches.size();
   }
 
  private:
@@ -125,9 +97,9 @@ class Check {
   // `renewed` where that node is a new one from there on, `members` then
   // being the new one's and `first` what the node before it received.
   struct Wrote {
-    Members members;
+    Members members = 0;
     bool renewed = false;
-    Members first;
+    Members first = 0;
   };
 
   template <class T>
@@ -153,7 +125,7 @@ class Check {
       if (users.empty() || users.back() != _rule) users.push_back(_rule);
       if (!slot(_seen, rule)) schedule(rule);
     }
-    return slot(_made, rule).clone();
+    return slot(_made, rule);
   }
 
   static constexpr unsigned none = ~0u;
@@ -168,17 +140,75 @@ class Check {
                   ": a member that holds one value is written once into a node");
   }
 
-  void check_overlap(const Members& a, const Members& b, std::string_view how) const {
-    if (!a.bits || !b.bits) return;
-    const bool smaller = !a.rest || (b.rest && a.rest->size() < b.rest->size());
-    const auto& own = smaller ? a : b;
-    const auto& other = smaller ? b : a;
-    unsigned first = none;
-    own.each([&](unsigned block, std::uint64_t mask) {
-      if (const auto shared = mask & other.get(block))
-        first = std::min(first, block * 64 + static_cast<unsigned>(std::countr_zero(shared)));
-    });
-    if (first != none) refuse(first, how);
+  // Leaves hold 64 properties. A union shares every unchanged branch with its
+  // operands. At most 26 levels cover the entire range of property numbers.
+  Members branch_id(std::array<Members, 2> branch) {
+    _branches.push_back(branch);
+    return _branches.size();
+  }
+
+  static constexpr unsigned kMaxDepth = std::numeric_limits<unsigned>::digits - 6;
+
+  bool merge(Members& set, Members other) {
+    struct Frame {
+      Members a, b, low;
+      bool high;
+    };
+    std::array<Frame, kMaxDepth> path;
+    Members a = set, b = other;
+    unsigned depth = _depth;
+    for (;;) {
+      if (depth && a && b && a != b) {
+        path[--depth] = {a, b, 0, false};
+        a = _branches[a - 1][0];
+        b = _branches[b - 1][0];
+        continue;
+      }
+      Members joined = a | b;
+      while (depth < _depth) {
+        auto& frame = path[depth];
+        const auto left = _branches[frame.a - 1], right = _branches[frame.b - 1];
+        if (!frame.high) {
+          frame.low = joined;
+          frame.high = true;
+          a = left[1];
+          b = right[1];
+          break;
+        }
+        const std::array branch{frame.low, joined};
+        joined = branch == left ? frame.a : branch == right ? frame.b : branch_id(branch);
+        ++depth;
+      }
+      if (depth == _depth) {
+        if (joined == set) return false;
+        set = joined;
+        return true;
+      }
+    }
+  }
+
+  unsigned overlap(Members a, Members b) const {
+    struct Pair { Members a, b; unsigned depth, base; };
+    std::array<Pair, kMaxDepth + 1> work;
+    unsigned count = 0;
+    work[count++] = {a, b, _depth, 0};
+    while (count) {
+      const auto [x, y, depth, base] = work[--count];
+      if (!x || !y) continue;
+      if (!depth) {
+        if (const auto common = x & y) return base + std::countr_zero(common);
+        continue;
+      }
+      const auto& left = _branches[x - 1];
+      const auto& right = _branches[y - 1];
+      work[count++] = {left[1], right[1], depth - 1, base + (32u << depth)};
+      work[count++] = {left[0], right[0], depth - 1, base};
+    }
+    return none;
+  }
+
+  void check_overlap(Members a, Members b, std::string_view how) const {
+    if (const auto m = overlap(a, b); m != none) refuse(m, how);
   }
 
   Descent<Wrote> written(ImageId id) {
@@ -191,15 +221,15 @@ class Check {
         co_return out;
       case ImageKind::ref:
         out.members = made(n.a);
-        out.first = out.members.clone();
+        out.first = out.members;
         co_return out;
       case ImageKind::choice:
         // A new node from there on where every alternative opens one.
         out.renewed = n.count != 0;
         for (std::uint32_t i = 0; i < n.count; ++i) {
           Wrote alternative = co_await written(_image.children[n.first + i]);
-          out.members.merge(alternative.members);
-          out.first.merge(alternative.first);
+          merge(out.members, alternative.members);
+          merge(out.first, alternative.first);
           out.renewed = out.renewed && alternative.renewed;
         }
         co_return out;
@@ -210,8 +240,8 @@ class Check {
           Wrote part = co_await written(_image.children[n.first + i]);
           check_overlap(out.members, part.first, "twice");
           check_overlap(out.first, part.members, "twice");
-          out.members.merge(part.members);
-          out.first.merge(part.first);
+          merge(out.members, part.members);
+          merge(out.first, part.first);
           out.renewed |= part.renewed;
         }
         co_return out;
@@ -228,8 +258,8 @@ class Check {
         Wrote inside = co_await written(_image.children[n.first]);
         if (n.kind == ImageKind::flag) out = std::move(inside);
         if (const auto m = member(n.row); m != none && n.kind != ImageKind::append) {
-          if (!out.members.insert(m)) refuse(m, "twice");
-          if (!out.renewed) out.first.insert(m);
+          if (!merge(out.members, _single[m])) refuse(m, "twice");
+          if (!out.renewed) merge(out.first, _single[m]);
         }
         co_return out;
       }
@@ -238,8 +268,8 @@ class Check {
         // from there on, until a nest in what it reads makes another.
         out = co_await written(_image.children[n.first]);
         if (const auto m = member(n.row); m != none) {
-          if (out.first.contains(m)) refuse(m, "twice");
-          if (!out.renewed) out.members.insert(m);
+          if (overlap(out.first, _single[m]) != none) refuse(m, "twice");
+          if (!out.renewed) merge(out.members, _single[m]);
         }
         out.renewed = true;
         out.first = {};
@@ -252,13 +282,13 @@ class Check {
     for (std::uint32_t i = 0; i < n.count; ++i) {
       Wrote part = co_await written(_image.children[n.first + i]);
       check_overlap(part.first, out.members, "twice");
-      if (!out.renewed) out.first.merge(part.first);
+      if (!out.renewed) merge(out.first, part.first);
       if (part.renewed) {
-        out.members = std::move(part.members);
+        out.members = part.members;
         out.renewed = true;
         continue;
       }
-      out.members.merge(part.members);
+      merge(out.members, part.members);
     }
     co_return out;
   }
@@ -266,6 +296,9 @@ class Check {
   GrammarImage& _image;
   std::unordered_map<const MemberDesc*, unsigned> _number;
   std::vector<std::string_view> _names;
+  unsigned _depth = 0;
+  std::vector<std::array<Members, 2>> _branches;
+  std::vector<Members> _single;
   // Per rule: what the node it hands over has written, the rules that read
   // that, whether it was met, and whether it waits to be read.
   std::vector<Members> _made;
@@ -278,8 +311,8 @@ class Check {
 
 }  // namespace
 
-void check_writes_once(GrammarImage& image, const LowerDesc& desc) {
-  Check(image, desc).run();
+std::size_t check_writes_once(GrammarImage& image, const LowerDesc& desc) {
+  return Check(image, desc).run();
 }
 
 }  // namespace cursiv::engine::gen
