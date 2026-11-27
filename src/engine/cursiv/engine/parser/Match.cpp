@@ -13,6 +13,12 @@ namespace cursiv::engine {
 // there, as far as places were asked, with its furthest repeat, `from`-`to`.
 struct Machine::Matchings {
   std::deque<Matching> searches;
+  struct Scan {
+    const char* begin;
+    const char* end;
+    std::uint32_t index;
+    std::size_t length;
+  } scan{};
   struct Echo {
     std::vector<TextOffset> z;
     TextOffset bound = 0;
@@ -119,9 +125,14 @@ CURSIV_ALWAYS_INLINE inline bool Matching::holds(Machine& m, const MatchEnd& x, 
 CURSIV_ALWAYS_INLINE inline std::size_t Matching::scanned(Machine& m, const MatchTables& a,
                                                           const MatchExit& e, const char* at) {
   m.observe_end(true);
+  auto* const matchings = m.matchings.get();
+  if (matchings && matchings->scan.begin == at && matchings->scan.end == m.end &&
+      matchings->scan.index == e.arg) return matchings->scan.length;
   const std::string_view input(at, m.end);
   const std::size_t length = a.scans[e.arg](input);
-  return length <= input.size() ? length : 0;
+  const auto matched = length <= input.size() ? length : 0;
+  if (matchings) matchings->scan = {at, m.end, e.arg, matched};
+  return matched;
 }
 
 CURSIV_ALWAYS_INLINE inline void Matching::leave(Machine& m, const MatchTables& a,
