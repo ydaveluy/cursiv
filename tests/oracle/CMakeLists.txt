@@ -59,9 +59,8 @@ function(cursiv_rgram seed)
   target_link_libraries(${id}_check PRIVATE rgramOracle cursiv::engine)
 endfunction()
 
-# One accepted seed per family, plus a scoped end behind nullable rules (6946)
-# and a guarded left recursion whose condition starts with a reduction (9176).
-set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176 27043192)
+# One accepted seed per family and regressions for scoped conditions and hidden left recursion.
+set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176 27043192 27044714)
 foreach(seed IN LISTS _rgram_fixed)
   cursiv_rgram(${seed})
   add_test(NAME rgram_${seed} COMMAND rgram${seed}_check)

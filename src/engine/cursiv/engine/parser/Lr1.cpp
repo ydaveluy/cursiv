@@ -173,6 +173,11 @@ struct Items {
         work.pop_back();
         queued[p] = false;
         const Production& q = cfg.productions[p];
+        // A nullable tail can test the caller's next token without consuming it.
+        std::size_t tail = q.rhs.size();
+        while (tail && !is_terminal(q.rhs[tail - 1]) && nullable[index_of(q.rhs[tail - 1])])
+          --tail;
+        const auto outer = behind(p);
         bool lead = true, inner = false;
         for (std::size_t at = 0; at < q.rhs.size(); ++at) {
           const Symbol s = q.rhs[at];
@@ -185,7 +190,7 @@ struct Items {
           const std::uint64_t in = begins[nt] | here(q, at, lead, inner);
           const std::uint64_t then =
               follows[nt] | (at + 1 < q.rhs.size() ? std::uint64_t{1} << q.scope_at(at + 1) : 0) |
-              (afterNullable[base[p] + at] ? behind(p) : 0);
+              (at + 1 >= tail ? outer : 0);
           if (in != begins[nt] || then != follows[nt])
             for (const std::uint32_t user : of[nt])
               if (!queued[user]) {
