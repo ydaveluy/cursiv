@@ -127,42 +127,31 @@ void Machine::accept() {
   CstNode whole = tape.at(root);
   // A root that is one token, read or invented, stays that leaf.
   const bool token = whole.subtreeSize == 1 && (whole.begin != whole.end || whole.isRecovered());
-  // The text skipped before it, back to the first of it: trivia read in
-  // between is held with it.
-  NodeCount first = root + 1 - whole.subtreeSize;
+  // Adopt skipped text on either side, including the trivia between it and the root.
+  const NodeCount start = root + 1 - whole.subtreeSize;
+  NodeCount first = start;
   for (NodeCount id = first; id != 0 && apart(id - 1); --id)
-    if (skipped(id - 1)) {
-      whole.begin = tape.at(id - 1).begin;
-      whole.subtreeSize += first - (id - 1);
-      first = id - 1;
-    }
-  // The text skipped after it, up to the last of it; all that follows where
-  // the root read nothing.
+    if (skipped(id - 1)) first = id - 1;
   NodeCount last = root;
-  const bool empty = whole.subtreeSize == 1 && whole.begin == whole.end;
   for (NodeCount id = root + 1; id != tape.records(); ++id)
-    if (skipped(id)) {
-      last = id;
-      whole.end = tape.at(id).end;
-    }
+    if (skipped(id)) last = id;
+  if (last != root) whole.end = tape.at(last).end;
   if (token && (first != root || last != root)) {
-    // The leaf and the text skipped around it go under a record of no
-    // action, written after them.
+    // Preserve the token as a child of an actionless wrapper.
     tape.leaf(0, 0, kNoElement);
     for (NodeCount id = tape.records() - 1; id != last + 1; --id) tape.at(id) = tape.at(id - 1);
-    whole.subtreeSize = last - first + 2;
     whole.setElement(kNoElement);
-    tape.at(last + 1) = whole;
-    root = last + 1;
-    return;
-  }
-  if (empty && last == root && first == root) {
-    last = tape.records() - 1;
-    whole.begin = whole.end = static_cast<TextOffset>(end - src);
+    ++last;
   } else {
-    whole.subtreeSize += last - root;
+    if (first == start && last == root) {
+      if (whole.subtreeSize != 1 || whole.begin != whole.end) return;
+      first = last = tape.records() - 1;
+      whole.begin = whole.end = static_cast<TextOffset>(end - src);
+    }
+    for (NodeCount id = root; id != last; ++id) tape.at(id) = tape.at(id + 1);
   }
-  for (NodeCount id = root; id != last; ++id) tape.at(id) = tape.at(id + 1);
+  whole.subtreeSize = last - first + 1;
+  if (first != last) whole.begin = tape.at(first).begin;
   tape.at(last) = whole;
   root = last;
 }

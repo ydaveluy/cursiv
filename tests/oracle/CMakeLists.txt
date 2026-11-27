@@ -59,8 +59,8 @@ function(cursiv_rgram seed)
   target_link_libraries(${id}_check PRIVATE rgramOracle cursiv::engine)
 endfunction()
 
-# One accepted seed per family and regressions for scoped conditions and hidden left recursion.
-set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176 27043192 27044714)
+# One accepted seed per family and seeds that exposed disagreements with the oracle or CST invariants.
+set(_rgram_fixed 107 169 189 242 296 164 126 223 6946 9176 27043192 27044714 28110057)
 foreach(seed IN LISTS _rgram_fixed)
   cursiv_rgram(${seed})
   add_test(NAME rgram_${seed} COMMAND rgram${seed}_check)
@@ -69,7 +69,9 @@ endforeach()
 
 # The fixed seeds' generators share one compilation, as the other test
 # generators do; the long run stays out of these batches.
-foreach(index RANGE 0 2)
+list(LENGTH _rgram_fixed _count)
+math(EXPR _last_batch "(${_count} - 1) / 4")
+foreach(index RANGE 0 ${_last_batch})
   math(EXPR first "${index} * 4")
   list(SUBLIST _rgram_fixed ${first} 4 batch)
   list(TRANSFORM batch PREPEND rgram)
